@@ -5,8 +5,8 @@ import logging
 from typing import Optional, List
 
 # --- IMPORT DARI DALAM 'src' & PATH ---
-from ..config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROXY_POOL, ROOT_DIR # Ambil ROOT_DIR
-# Hapus import TEMP_FILES_DIR
+# Hapus TEMP_FILES_DIR
+from ..config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROXY_POOL, ROOT_DIR
 # -------------------------------------
 
 logger = logging.getLogger(__name__)
