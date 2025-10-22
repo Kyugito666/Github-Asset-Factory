@@ -1,0 +1,22 @@
+# requirements.txt
+
+# AI Abstraction Layer & Drivers
+litellm
+google-generativeai
+cohere
+replicate
+huggingface_hub
+mistralai
+groq # Optional
+
+# Telegram Bot
+python-telegram-bot
+
+# HTTP Requests
+requests
+
+# Environment variables
+python-dotenv
+
+# TUI Library
+textual
