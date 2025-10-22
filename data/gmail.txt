@@ -1,0 +1,6 @@
+# data/gmail.txt
+# Satu email per baris
+contoh.email1@gmail.com
+email.kedua.anda@gmail.com
+user.lain@gmail.com
+# Baris kosong dan komentar (#) diabaikan
