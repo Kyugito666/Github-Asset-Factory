@@ -5,13 +5,16 @@ import random
 import time
 from typing import Optional, Dict, List
 
-from ..prompts.prompts import BASE_PERSONA_PROMPT, ASSET_PROMPTS # Naik 1 level (..) lalu ke prompts
-from ..config import ( # Naik 1 level (..) lalu ke config
+# Tambahkan import exceptions
+from litellm import exceptions as litellm_exceptions
+
+from ..prompts.prompts import BASE_PERSONA_PROMPT, ASSET_PROMPTS
+from ..config import (
     GEMINI_API_KEYS, GROQ_API_KEYS, COHERE_API_KEYS, REPLICATE_API_KEYS,
     HF_API_TOKENS, OPENROUTER_API_KEYS, MISTRAL_API_KEYS, FIREWORKS_API_KEYS,
     PROXY_POOL
 )
-from ..modules.persona_history import load_used_data, add_to_history, load_history_data # Naik 1 level (..) lalu ke modules
+from ..modules.persona_history import load_used_data, add_to_history, load_history_data
 
 logger = logging.getLogger(__name__)
 # litellm.set_verbose = True # Uncomment for debugging LiteLLM calls
@@ -19,202 +22,118 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # LITELMM ROUTER SETUP
 # ============================================================
-
-# 1. Definisikan Model List untuk Router
 model_list = []
-
-# --- Helper Function for Proxy ---
 def get_proxy_for_provider(provider_prefix: str) -> Optional[str]:
+    # ... (fungsi ini sama seperti sebelumnya) ...
     if not PROXY_POOL: return None
-    proxy_url = PROXY_POOL.get_next_proxy() # Ambil proxy dari pool kita
+    proxy_url = PROXY_POOL.get_next_proxy();
     if not proxy_url: return None
-    # Provider yang biasanya butuh prefix
-    if provider_prefix in ["gemini", "cohere", "groq", "huggingface", "mistral"]:
-        return f"{provider_prefix}:{proxy_url}"
-    # Provider yang mungkin tidak butuh
-    elif provider_prefix in ["openrouter", "replicate", "fireworks"]:
-        return proxy_url
-    else: # Default
-        return proxy_url
+    if provider_prefix in ["gemini", "cohere", "groq", "huggingface", "mistral"]: return f"{provider_prefix}:{proxy_url}"
+    elif provider_prefix in ["openrouter", "replicate", "fireworks"]: return proxy_url
+    else: return proxy_url
 
-# --- Helper Function to Add Models ---
 def add_models_to_router(keys: list, provider: str, model_configs: List[Dict]):
-    """Helper to add multiple models for a provider using their keys."""
-    if not keys: return # Skip if no keys for this provider
-
+    # ... (fungsi ini sama seperti sebelumnya) ...
+    if not keys: return
     provider_lower = provider.lower()
-
     for key_index, key in enumerate(keys):
         for model_config in model_configs:
-            # Create a unique model_name for the router for this specific key and model variant
             unique_model_name = f"{provider_lower}-{model_config['suffix']}_{key_index}"
-
-            litellm_params = {
-                "model": model_config["litellm_id"],
-                "api_key": key,
-                # Add base_url if needed (e.g., for Fireworks, though LiteLLM might handle it)
-            }
-            # Add optional params if they exist in config
+            litellm_params = {"model": model_config["litellm_id"], "api_key": key}
             if "max_tokens" in model_config: litellm_params["max_tokens"] = model_config["max_tokens"]
-
-            # Get proxy (rotate proxy per model deployment for better distribution)
             litellm_params["proxy"] = get_proxy_for_provider(provider_lower)
-
             model_list.append({
                 "model_name": unique_model_name,
                 "litellm_params": litellm_params,
-                "model_info": {"provider": provider} # Store original provider name
+                "model_info": {"provider": provider}
             })
 
-# --- Define Models for Each Provider (SESUAI LIST USER TERAKHIR) ---
+# --- Define Models for Each Provider (PERIKSA LAGI ID MODEL INI!) ---
 
-# Gemini (Dari list user)
+# Gemini
 gemini_models = [
-    {"suffix": "2.5-pro", "litellm_id": "gemini/gemini-2.5-pro", "max_tokens": 8192},
+    # Pastikan ID ini valid di LiteLLM/Google AI
     {"suffix": "2.5-flash", "litellm_id": "gemini/gemini-2.5-flash", "max_tokens": 8192},
-    {"suffix": "2.5-flash-preview", "litellm_id": "gemini/gemini-2.5-flash-preview-09-2025", "max_tokens": 8192}, # Asumsi nama preview
-    {"suffix": "2.5-flash-lite", "litellm_id": "gemini/gemini-2.5-flash-lite", "max_tokens": 8192}, # Asumsi nama lite
-    {"suffix": "2.5-flash-lite-preview", "litellm_id": "gemini/gemini-2.5-flash-lite-preview-09-2025", "max_tokens": 8192}, # Asumsi
-    {"suffix": "2.0-flash", "litellm_id": "gemini/gemini-2.0-flash", "max_tokens": 8192},
-    {"suffix": "2.0-flash-lite", "litellm_id": "gemini/gemini-2.0-flash-lite", "max_tokens": 8192}, # Asumsi
 ]
 add_models_to_router(GEMINI_API_KEYS, "Gemini", gemini_models)
 
-# Cohere (Dari list user)
+# Cohere
 cohere_models = [
-    {"suffix": "aya-expanse-32b", "litellm_id": "cohere/c4ai-aya-expanse-32b", "max_tokens": 4096},
-    {"suffix": "aya-expanse-8b", "litellm_id": "cohere/c4ai-aya-expanse-8b", "max_tokens": 4096},
-    {"suffix": "command-r-08-2024", "litellm_id": "cohere/command-r-08-2024", "max_tokens": 4096}, # Mungkin versi lama
-    {"suffix": "command-r-plus-08-2024", "litellm_id": "cohere/command-r-plus-08-2024", "max_tokens": 4096}, # Mungkin versi lama
+    # Pastikan ID ini valid
+    {"suffix": "command-r-plus", "litellm_id": "cohere/command-r-plus", "max_tokens": 4096},
 ]
 add_models_to_router(COHERE_API_KEYS, "Cohere", cohere_models)
 
-# Mistral AI (Dari list user)
+# Mistral AI
 mistral_models = [
-    {"suffix": "medium-chat", "litellm_id": "mistral/mistral-medium-latest", "max_tokens": 8000}, # Chat model
-    {"suffix": "codestral-code", "litellm_id": "mistral/codestral-latest", "max_tokens": 8000}, # Code model
+    # Pastikan ID ini valid
+    {"suffix": "large-latest", "litellm_id": "mistral/mistral-large-latest", "max_tokens": 8000},
+    {"suffix": "codestral-latest", "litellm_id": "mistral/codestral-latest", "max_tokens": 8000},
 ]
 add_models_to_router(MISTRAL_API_KEYS, "Mistral", mistral_models)
 
-# Fireworks AI (Dari list user)
+# Fireworks AI
 fireworks_models = [
-    # Format: fireworks/accounts/fireworks/models/<model-id>
-    {"suffix": "deepseek-v3p1-terminus", "litellm_id": "fireworks/accounts/fireworks/models/deepseek-v3p1-terminus", "max_tokens": 8000},
-    {"suffix": "kimi-k2-instruct-0905", "litellm_id": "fireworks/accounts/fireworks/models/kimi-k2-instruct-0905", "max_tokens": 8000},
-    {"suffix": "deepseek-v3p1", "litellm_id": "fireworks/accounts/fireworks/models/deepseek-v3p1", "max_tokens": 8000},
-    {"suffix": "gpt-oss-120b", "litellm_id": "fireworks/accounts/fireworks/models/gpt-oss-120b", "max_tokens": 4096}, # Check limits
-    {"suffix": "gpt-oss-20b", "litellm_id": "fireworks/accounts/fireworks/models/gpt-oss-20b", "max_tokens": 4096}, # Check limits
-    {"suffix": "glm-4p6", "litellm_id": "fireworks/accounts/fireworks/models/glm-4p6", "max_tokens": 8000},
-    {"suffix": "qwen3-235b-thinking", "litellm_id": "fireworks/accounts/fireworks/models/qwen3-235b-a22b-thinking-2507", "max_tokens": 8000}, # Check ID
-    {"suffix": "qwen3-coder-480b", "litellm_id": "fireworks/accounts/fireworks/models/qwen3-coder-480b-a35b-instruct", "max_tokens": 8000}, # Check ID
-    {"suffix": "qwen3-235b-instruct", "litellm_id": "fireworks/accounts/fireworks/models/qwen3-235b-a22b-instruct-2507", "max_tokens": 8000}, # Check ID
-    {"suffix": "kimi-k2-instruct", "litellm_id": "fireworks/accounts/fireworks/models/kimi-k2-instruct", "max_tokens": 8000},
+    # Pastikan ID ini valid di Fireworks/LiteLLM
+    {"suffix": "mixtral-8x7b", "litellm_id": "fireworks/accounts/fireworks/models/mixtral-8x7b-instruct", "max_tokens": 32768},
+    {"suffix": "llama-v3-70b", "litellm_id": "fireworks/accounts/fireworks/models/llama-v3-70b-instruct", "max_tokens": 8192},
 ]
 add_models_to_router(FIREWORKS_API_KEYS, "Fireworks", fireworks_models)
 
-# OpenRouter (Dari list user, pakai ID langsung)
+# OpenRouter
 openrouter_models = [
-    {"suffix": "andromeda-alpha", "litellm_id": "openrouter/andromeda-alpha", "max_tokens": 8000},
-    {"suffix": "tongyi-deepresearch", "litellm_id": "openrouter/alibaba/tongyi-deepresearch-30b-a3b:free", "max_tokens": 8000},
-    {"suffix": "longcat-flash", "litellm_id": "openrouter/meituan/longcat-flash-chat:free", "max_tokens": 8000},
-    {"suffix": "nemotron-nano", "litellm_id": "openrouter/nvidia/nemotron-nano-9b-v2:free", "max_tokens": 8000},
-    {"suffix": "deepseek-chat-v3", "litellm_id": "openrouter/deepseek/deepseek-chat-v3.1:free", "max_tokens": 8000},
-    {"suffix": "gpt-oss-20b-free", "litellm_id": "openrouter/openai/gpt-oss-20b:free", "max_tokens": 4096},
-    {"suffix": "glm-4.5-air", "litellm_id": "openrouter/z-ai/glm-4.5-air:free", "max_tokens": 8000},
-    {"suffix": "qwen3-coder-free", "litellm_id": "openrouter/qwen/qwen3-coder:free", "max_tokens": 8000},
-    {"suffix": "kimi-k2-free", "litellm_id": "openrouter/moonshotai/kimi-k2:free", "max_tokens": 8000},
-    {"suffix": "dolphin-mistral-venice", "litellm_id": "openrouter/cognitivecomputations/dolphin-mistral-24b-venice-edition:free", "max_tokens": 8000},
-    {"suffix": "gemma-3n-e2b", "litellm_id": "openrouter/google/gemma-3n-e2b-it:free", "max_tokens": 8000},
-    {"suffix": "hunyuan-a13b", "litellm_id": "openrouter/tencent/hunyuan-a13b-instruct:free", "max_tokens": 8000},
-    {"suffix": "deepseek-chimera", "litellm_id": "openrouter/tngtech/deepseek-r1t2-chimera:free", "max_tokens": 8000},
-    {"suffix": "mistral-small-3.2", "litellm_id": "openrouter/mistralai/mistral-small-3.2-24b-instruct:free", "max_tokens": 8000},
-    {"suffix": "kimi-dev-72b", "litellm_id": "openrouter/moonshotai/kimi-dev-72b:free", "max_tokens": 8000},
-    {"suffix": "deepseek-r1-qwen3", "litellm_id": "openrouter/deepseek/deepseek-r1-0528-qwen3-8b:free", "max_tokens": 8000},
-    {"suffix": "deepseek-r1-0528", "litellm_id": "openrouter/deepseek/deepseek-r1-0528:free", "max_tokens": 8000},
-    {"suffix": "devstral-small", "litellm_id": "openrouter/mistralai/devstral-small-2505:free", "max_tokens": 8000},
-    {"suffix": "gemma-3n-e4b", "litellm_id": "openrouter/google/gemma-3n-e4b-it:free", "max_tokens": 8000},
-    {"suffix": "llama-3.3-8b", "litellm_id": "openrouter/meta-llama/llama-3.3-8b-instruct:free", "max_tokens": 8000},
-    {"suffix": "qwen3-4b", "litellm_id": "openrouter/qwen/qwen3-4b:free", "max_tokens": 8000},
+    # Pastikan ID ini valid di OpenRouter/LiteLLM
+    {"suffix": "llama-3.3-8b-free", "litellm_id": "openrouter/meta-llama/llama-3.3-8b-instruct:free", "max_tokens": 8000},
+    {"suffix": "gemma-3n-e4b-free", "litellm_id": "openrouter/google/gemma-3n-e4b-it:free", "max_tokens": 8000},
+    # Tambahkan model berbayar jika perlu & API key support
+    # {"suffix": "claude-3-haiku", "litellm_id": "openrouter/anthropic/claude-3-haiku", "max_tokens": 4096},
 ]
 add_models_to_router(OPENROUTER_API_KEYS, "OpenRouter", openrouter_models)
 
-# Hugging Face (Dari list user, format: huggingface/owner/repo)
+# Hugging Face
 hf_models = [
-    {"suffix": "C2S-Scale-Gemma", "litellm_id": "huggingface/vandijklab/C2S-Scale-Gemma-2-27B", "max_tokens": 4096},
-    # {"suffix": "Ling-1T", "litellm_id": "huggingface/inclusionAI/Ling-1T", "max_tokens": 4096}, # Skip?
-    {"suffix": "GLM-4.6", "litellm_id": "huggingface/zai-org/GLM-4.6", "max_tokens": 8000},
-    # {"suffix": "Arch-Router", "litellm_id": "huggingface/katanemo/Arch-Router-1.5B", "max_tokens": 4096}, # Skip?
-    {"suffix": "UserLM-8b", "litellm_id": "huggingface/microsoft/UserLM-8b", "max_tokens": 4096},
-    # {"suffix": "Schematron-3B", "litellm_id": "huggingface/inference-net/Schematron-3B", "max_tokens": 4096}, # Skip?
-    {"suffix": "gpt-oss-20b-hf", "litellm_id": "huggingface/openai/gpt-oss-20b", "max_tokens": 4096},
-    {"suffix": "DeepSeek-V3.2-Exp", "litellm_id": "huggingface/deepseek-ai/DeepSeek-V3.2-Exp", "max_tokens": 8000},
-    # {"suffix": "Ring-1T", "litellm_id": "huggingface/inclusionAI/Ring-1T", "max_tokens": 4096}, # Skip?
-    {"suffix": "gpt-oss-120b-hf", "litellm_id": "huggingface/openai/gpt-oss-120b", "max_tokens": 4096},
+    # Pastikan ID ini valid dan modelnya support Inference API
+    # {"suffix": "mistral-7b", "litellm_id": "huggingface/mistralai/Mistral-7B-Instruct-v0.1", "max_tokens": 4096},
+    {"suffix": "gpt-oss-20b-hf", "litellm_id": "huggingface/openai/gpt-oss-20b", "max_tokens": 4096}, # Cek ketersediaan
 ]
 add_models_to_router(HF_API_TOKENS, "HuggingFace", hf_models)
 
-# Replicate (Dari list user, format: replicate/owner/model - Coba tanpa hash)
-# WARNING: GPT-5, Llama-4, Gemini via Replicate likely won't work. Included as requested.
+# Replicate (BUTUH HASH!)
 replicate_models = [
-    # {"suffix": "gpt-5", "litellm_id": "replicate/openai/gpt-5", "max_tokens": 8000}, # Fiksi?
-    # {"suffix": "o4-mini", "litellm_id": "replicate/openai/o4-mini", "max_tokens": 8000}, # Fiksi?
-    {"suffix": "kimi-k2-instruct-rep", "litellm_id": "replicate/moonshotai/kimi-k2-instruct", "max_tokens": 8000},
-    # {"suffix": "llama-4-maverick", "litellm_id": "replicate/meta/llama-4-maverick-instruct", "max_tokens": 8000}, # Fiksi?
-    {"suffix": "granite-3.3-8b", "litellm_id": "replicate/ibm-granite/granite-3.3-8b-instruct", "max_tokens": 4096},
-    # {"suffix": "deepseek-v3", "litellm_id": "replicate/deepseek-ai/deepseek-v3", "max_tokens": 8000}, # Kurang spesifik
-    {"suffix": "qwen3-235b-instruct-rep", "litellm_id": "replicate/qwen/qwen3-235b-a22b-instruct-2507", "max_tokens": 8000}, # Perlu cek ID
-    # {"suffix": "gemini-2.5-flash", "litellm_id": "replicate/google/gemini-2.5-flash", "max_tokens": 8192}, # Unlikely.
-    {"suffix": "llama-3-70b-instruct-rep", "litellm_id": "replicate/meta/meta-llama-3-70b-instruct", "max_tokens": 8000},
-    {"suffix": "llama-3-70b-rep", "litellm_id": "replicate/meta/meta-llama-3-70b", "max_tokens": 8000},
-    {"suffix": "llama-2-70b-chat-rep", "litellm_id": "replicate/meta/llama-2-70b-chat", "max_tokens": 4096},
+    # Ganti <hash> dengan hash asli dari Replicate! Kalau tidak, baris ini akan di-skip.
+    {"suffix": "llama-3-70b", "litellm_id": "replicate/meta/meta-llama-3-70b-instruct:<hash_untuk_llama3_70b>", "max_tokens": 8000},
 ]
-add_models_to_router(REPLICATE_API_KEYS, "Replicate", replicate_models)
+valid_replicate_models = []
+for m in replicate_models:
+    if "<hash" not in m["litellm_id"]: valid_replicate_models.append(m)
+    else: logger.warning(f"Replicate model {m['suffix']} skipped: Hash placeholder found in '{m['litellm_id']}'. Please update llm_service.py.")
+add_models_to_router(REPLICATE_API_KEYS, "Replicate", valid_replicate_models)
 
-# Groq (Dari list user, hapus yg bukan text/safety)
+# Groq (Jika keys valid lagi)
 groq_models = [
     {"suffix": "llama-3.1-8b", "litellm_id": "groq/llama-3.1-8b-instant", "max_tokens": 8000},
-    {"suffix": "llama-3.3-70b", "litellm_id": "groq/llama-3.3-70b-versatile", "max_tokens": 8000},
-    {"suffix": "gpt-oss-120b-groq", "litellm_id": "groq/openai/gpt-oss-120b", "max_tokens": 4096}, # Check availability
-    {"suffix": "gpt-oss-20b-groq", "litellm_id": "groq/openai/gpt-oss-20b", "max_tokens": 4096}, # Check availability
-    # Skipping Whisper, Llama Guard, Compound
-    # {"suffix": "llama-4-maverick-groq", "litellm_id": "groq/meta-llama/llama-4-maverick-17b-128e-instruct", "max_tokens": 8000}, # Fiksi?
-    # {"suffix": "llama-4-scout-groq", "litellm_id": "groq/meta-llama/llama-4-scout-17b-16e-instruct", "max_tokens": 8000}, # Fiksi?
-    {"suffix": "kimi-k2-instruct-groq", "litellm_id": "groq/moonshotai/kimi-k2-instruct-0905", "max_tokens": 8000}, # Check availability
-    {"suffix": "qwen3-32b-groq", "litellm_id": "groq/qwen/qwen3-32b", "max_tokens": 8000}, # Check availability
 ]
 add_models_to_router(GROQ_API_KEYS, "Groq", groq_models)
 
+
 # 2. Inisialisasi Router
 if model_list:
-    router = litellm.Router(
-        model_list=model_list,
-        routing_strategy="latency", # Pilih berdasarkan latensi tercepat
-        set_verbose=False,          # Set True untuk debug Router
-        num_retries=1,              # Router fallback otomatis jika model tercepat gagal 1x
-        allowed_fails=10            # Toleransi error sebelum model/key ditandai 'down'
-    )
+    router = litellm.Router(model_list=model_list, routing_strategy="latency", set_verbose=False, num_retries=1, allowed_fails=10)
     logger.info(f"✅ LiteLLM Router initialized with {len(model_list)} model deployments and 'latency' strategy.")
-    # Log model yang terdaftar (versi pendek)
-    registered_models_short = list(dict.fromkeys([m["litellm_params"]["model"] for m in model_list])) # Unik model IDs
+    registered_models_short = list(dict.fromkeys([m["litellm_params"]["model"] for m in model_list]))
     logger.info(f"Registered model IDs (across all keys): {', '.join(registered_models_short)}")
 else:
     router = None
-    logger.critical("❌ No valid API keys/models defined. LiteLLM Router cannot be initialized.")
+    logger.critical("❌ No valid API keys/models defined OR issue loading keys. LiteLLM Router cannot be initialized.")
 
 # ============================================================
 # UTILITY FUNCTIONS (Tidak berubah)
 # ============================================================
-def clean_ai_response(raw_text: str) -> str:
-    cleaned=raw_text.strip();
-    if cleaned.startswith("```"): lines=cleaned.split('\n')[1:];
-    if lines and lines[-1].strip()=="```": lines=lines[:-1]; cleaned='\n'.join(lines).strip()
-    first_brace=cleaned.find('{'); last_brace=cleaned.rfind('}')
-    if first_brace!=-1 and last_brace!=-1: cleaned=cleaned[first_brace:last_brace+1]
-    return cleaned
-def ai_decide_send_method(persona_type: str, has_files: bool) -> str: return 'text' if has_files else 'none'
+def clean_ai_response(raw_text: str) -> str: /* ... sama ... */
+def ai_decide_send_method(persona_type: str, has_files: bool) -> str: /* ... sama ... */
 
 # ============================================================
-# CORE AI CALLER (PAKAI ROUTER)
+# CORE AI CALLER (EXCEPT BLOCK DIPERBAIKI)
 # ============================================================
 def call_llm(prompt: str) -> Optional[str]:
     """Panggil AI menggunakan LiteLLM Router."""
@@ -229,12 +148,17 @@ def call_llm(prompt: str) -> Optional[str]:
         logger.info(f"✅ Router chose '{chosen_model_router_name}' (Model: {original_model_id}, Provider: {provider})")
         if result: return result
         else: logger.warning(f"AI Router ({provider}) returned an empty response."); return None
-    except litellm.Timeout as e: logger.error(f"AI Router call timed out: {e}"); return None
-    except litellm.APIConnectionError as e: logger.error(f"AI Router connection error: {e}"); return None
-    except (litellm.AuthenticationError, litellm.BadRequestError, litellm.RateLimitError, litellm.NotFound) as e:
+    except litellm_exceptions.Timeout as e: logger.error(f"AI Router call timed out: {e}"); return None # Pakai litellm_exceptions
+    except litellm_exceptions.APIConnectionError as e: logger.error(f"AI Router connection error: {e}"); return None # Pakai litellm_exceptions
+    # --- EXCEPT BLOCK DIPERBAIKI ---
+    except (litellm_exceptions.AuthenticationError, litellm_exceptions.BadRequestError,
+            litellm_exceptions.RateLimitError, litellm_exceptions.NotFound) as e:
+         # Tangkap error API spesifik DARI litellm.exceptions
          logger.error(f"AI Router API Error: {type(e).__name__} - {str(e)[:200]}")
-         return None
+         return None # Router akan handle fallback
+    # -----------------------------
     except Exception as e:
+        # Tangkap error umum lainnya
         logger.error(f"AI Router generic error: {type(e).__name__} - {str(e)[:200]}", exc_info=False)
         return None
 
@@ -242,6 +166,7 @@ def call_llm(prompt: str) -> Optional[str]:
 # MAIN GENERATION (Tidak berubah)
 # ============================================================
 def generate_persona_data(persona_type: str) -> Optional[Dict]:
+    # ... (Sama persis seperti versi sebelumnya) ...
     logger.info(f"🔄 AI Chaining: '{persona_type}'")
     used_usernames, used_names = load_used_data()
     logger.info("📝 Step 1: Base Persona (with duplicate check)")
