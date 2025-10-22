@@ -1,0 +1,5 @@
+# data/proxy.txt
+# Satu proxy per baris, format: http://user:pass@host:port
+http://user1:pass1@p.webshare.io:80
+http://user2:pass2@123.45.67.89:8080
+# HTTPS proxy juga bisa: https://user3:pass3@secure.proxy.com:443
