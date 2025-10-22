@@ -1,0 +1,32 @@
+# .gitignore
+
+# Python virtual environment
+venv/
+.venv/
+myenv/ # Nama venv lama lu
+
+# Python cache/byte-code
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Secrets - JANGAN PERNAH DI-COMMIT
+.env
+
+# Logs
+logs/
+*.log
+
+# Generated History/Data (Jangan di-commit, bisa gede/sensitif)
+history/
+data/proxy.txt
+data/gmail.txt
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE specific (Optional)
+.idea/
+.vscode/
