@@ -16,8 +16,10 @@ def format_profile_message(persona_type: str, data: dict) -> str:
     message = f"✅ *Aset Persona Dibuat: {persona_title}*\n\n"
     message += "*--- PROFIL DATA ---*\n"
 
-    # Define fields in the desired GitHub order
-    profile_order = ["name", "username", "bio", "pronouns", "website", "social_links", "company", "location"]
+    # === PERUBAHAN DI SINI ===
+    # Define fields in the desired GitHub order (Username dulu baru Name)
+    profile_order = ["username", "name", "bio", "pronouns", "website", "social_links", "company", "location"]
+    # === AKHIR PERUBAHAN ===
 
     for key in profile_order:
         value = data.get(key)
@@ -194,3 +196,5 @@ def send_persona_to_telegram(persona_type: str, data: dict, chat_id: str = None)
     else:
         logger.warning(f"[!] Profile sent, but only {success_count}/{total_files} file(s) were sent successfully.")
         return False # Anggap gagal jika tidak semua file terkirim
+
+}
