@@ -286,4 +286,13 @@ def generate_persona_data(persona_type: str) -> Optional[Dict]:
         logger.info(f"✅ Assets generated for repo '{asset_data.get('repo_name', base_data.get('username'))}'.")
     
     except Exception as e:
-        logger.error(f"❌ Step 2 JSON parse
+        logger.error(f"❌ Step 2 JSON parse error: {e}. Raw: {raw_2[:100]}...")
+        return None
+    
+    final_data = base_data.copy()
+    final_data.update(asset_data)
+    has_files = bool(final_data.get('files'))
+    final_data['send_method'] = ai_decide_send_method(persona_type, has_files)
+    
+    logger.info(f"✅ Complete: '{persona_type}' (Method: {final_data['send_method']})")
+    return final_data
