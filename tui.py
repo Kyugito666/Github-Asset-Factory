@@ -16,9 +16,10 @@ try:
     project_root = os.path.dirname(os.path.abspath(__file__))
     src_path = os.path.join(project_root, 'src')
     if src_path not in sys.path: sys.path.insert(0, src_path)
+    # Panggil setup_logging SEBELUM import lain yg mungkin log
     from config import setup_logging
-    setup_logging(is_controller=True)
-    logger = logging.getLogger(__name__)
+    setup_logging(is_controller=True) # TUI adalah controller
+    logger = logging.getLogger(__name__) # Setup logger setelah setup_logging
 except ImportError as e:
     print(f"Fatal Error: Could not import 'setup_logging' from 'src.config'.")
     print(f"Import Error: {e}"); sys.exit(1)
@@ -53,7 +54,7 @@ def log_reader_thread(stdout_pipe, stop_event, app_instance):
         try: app_instance.call_from_thread(app_instance.add_log_line, "[TUI] Log reader thread stopped.")
         except Exception: pass
 
-# --- Class TuiApp (Subprocess call diubah) ---
+# --- Class TuiApp ---
 class TuiApp(App):
     CSS = """ Screen { layout: vertical; overflow: hidden; } Header { dock: top; } Footer { dock: bottom; } #main-container { layout: horizontal; height: 100%; } #menu-panel { width: 35; height: 100%; border-right: solid white; padding: 1; overflow-y: auto; } #log-panel { width: 1fr; height: 100%; } Log { height: 100%; width: 100%; } Button { width: 100%; margin: 1 0; } """
     BINDINGS = [("q", "quit_app", "Exit"), ("escape", "quit_app", "Exit"), ("c", "clear_log", "Clear Log"), ("down", "focus_next_button", "Next"), ("up", "focus_prev_button", "Prev")]
@@ -66,12 +67,30 @@ class TuiApp(App):
             with Vertical(id="log-panel"): yield self.log_widget
         yield Footer()
     def on_mount(self) -> None: self.add_log_line("[TUI] Controller loaded."); self.add_log_line("[TUI] Use Arrows + Enter."); self.query_one(Button).focus()
+
+    # --- watch_is_running (SYNTAX DIPERBAIKI) ---
     def watch_is_running(self, running: bool) -> None:
-        global bot_process; try: btn_start_stop = self.query_one("#btn_start_stop", Button)
-        except Exception: return
-        if running and bot_process: status = f"STATUS: ✅ RUNNING\n\nPID: {bot_process.pid}"; btn_start_stop.label = "🛑 Stop Server"; btn_start_stop.variant = "error"
-        else: status = "STATUS: ❌ STOPPED\n\nPID: -"; btn_start_stop.label = "▶️ Start Server"; btn_start_stop.variant = "success"
+        """Update status widget DAN label tombol saat 'self.is_running' berubah"""
+        global bot_process
+        try:
+            # Cari tombolnya
+            btn_start_stop = self.query_one("#btn_start_stop", Button)
+        except Exception:
+             # Widget mungkin belum siap saat TUI pertama kali load
+             return
+
+        # Update label dan status berdasarkan 'running'
+        if running and bot_process:
+            status = f"STATUS: ✅ RUNNING\n\nPID: {bot_process.pid}"
+            btn_start_stop.label = "🛑 Stop Server"
+            btn_start_stop.variant = "error"
+        else:
+            status = "STATUS: ❌ STOPPED\n\nPID: -"
+            btn_start_stop.label = "▶️ Start Server"
+            btn_start_stop.variant = "success"
         self.status_widget.update(status)
+    # -----------------------------------------
+
     def add_log_line(self, line: str) -> None:
         if not line.startswith("[TUI]"): self.log_widget.write_line(line)
     def action_clear_log(self) -> None: self.log_widget.clear(); self.add_log_line("[TUI] Log view cleared by user.")
@@ -101,29 +120,10 @@ class TuiApp(App):
         if bot_process is not None and bot_process.poll() is None: logger.warning("Start ignored: Bot already running."); self.is_running = True; return
         self.add_log_line("[TUI] Attempting to start worker process..."); logger.info("Attempting to start worker process...")
         try:
-            # --- CARA MANGGIL SUBPROCESS DIUBAH ---
-            python_executable = sys.executable
-            # Gunakan '-m' untuk menjalankan sebagai module
-            command = [
-                python_executable, "-m", "src.bot"
-            ]
-            # Tentukan working directory ke parent dari src/ (root folder)
-            # agar 'src.bot' bisa ditemukan
+            python_executable = sys.executable; command = [python_executable, "-m", "src.bot"]
             project_root = os.path.dirname(os.path.abspath(__file__))
-
-            bot_process = subprocess.Popen(
-                command, # Pakai command baru
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=False, bufsize=1,
-                cwd=project_root, # Set working directory
-                # env=os.environ.copy() # Pastikan env var diteruskan jika perlu
-            )
-            # ------------------------------------
-
-            log_thread_stop_event.clear()
-            log_thread = threading.Thread(target=log_reader_thread, args=(bot_process.stdout, log_thread_stop_event, self), daemon=True)
-            log_thread.start()
+            bot_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=False, bufsize=1, cwd=project_root)
+            log_thread_stop_event.clear(); log_thread = threading.Thread(target=log_reader_thread, args=(bot_process.stdout, log_thread_stop_event, self), daemon=True); log_thread.start()
             time.sleep(1) # Tunggu proses start
             if bot_process.poll() is None: self.add_log_line(f"[TUI] Worker started (PID: {bot_process.pid})"); logger.info(f"Worker process started (PID: {bot_process.pid})."); self.is_running = True
             else: exit_code = bot_process.poll(); error_msg = f"[TUI] Worker failed to start (Code: {exit_code}). Check logs."; self.add_log_line(error_msg); logger.error(error_msg); bot_process = None; self.is_running = False
