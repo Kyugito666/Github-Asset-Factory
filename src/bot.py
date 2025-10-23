@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# File ini sekarang ada di dalam src/
 
 import sys
 import logging
@@ -8,10 +7,12 @@ import asyncio
 import os
 from typing import List
 
-# --- IMPORT DARI DALAM 'src' ---
-# Panggil setup_logging DARI config SEBELUM import lain yg log
-from .config import TELEGRAM_BOT_TOKEN, validate_config, setup_logging # Pakai titik (.)
-setup_logging(is_controller=False) # Worker selalu False
+# Import config dan setup_logging (Relative)
+from .config import TELEGRAM_BOT_TOKEN, validate_config, setup_logging
+
+# Setup logging untuk worker (ke file + console)
+setup_logging(is_controller=False)
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -20,15 +21,14 @@ try:
 except ImportError:
     logger.critical("Failed to import python-telegram-bot. Install: pip install python-telegram-bot"); sys.exit(1)
 
-from .services.llm_service import generate_persona_data # Pakai titik (.)
-from .services.telegram_service import send_persona_to_telegram, send_text_message # Pakai titik (.)
-from .modules.gmail_trick import ( # Pakai titik (.)
-    generate_dot_tricks, load_gmail_list,
-    add_variation_to_history, get_generated_variations, get_stats
-)
-# --------------------------------
+# --- DIPERBARUI (Hapus import router) ---
+from .services.llm import generate_persona_data, llm_call_options # Import llm_call_options untuk stats
+from .services.telegram import send_persona_to_telegram, send_text_message
+from .modules.gmail import generate_dot_tricks, load_gmail_list, add_variation_to_history, get_generated_variations, get_stats
+# -------------------------------------
 
-# --- LIST INI DIPERBARUI & DIORGANISIR ULANG ---
+
+# --- LIST PERSONA (Tidak berubah) ---
 ALL_PERSONAS = [
     # Kategori Generalist & Foundational
     "explorer",         # Suka coba-coba repo baru
@@ -87,7 +87,6 @@ ALL_PERSONAS = [
     "security_researcher", # Buat 1 script security dasar (script + readme + disclaimer)
     "niche_guy",        # Fokus ke teknologi spesifik/kurang umum (no code asset)
 ]
-# Total: 40 Persona
 # -------------------------
 
 
@@ -101,278 +100,236 @@ def get_main_keyboard():
         [KeyboardButton("📧 Dot Trick"), KeyboardButton("ℹ️ Info")],
         [KeyboardButton("📊 Stats")]
     ]
-    # is_persistent=False agar tidak nyangkut
     return ReplyKeyboardMarkup(
         keyboard,
         resize_keyboard=True,
-        is_persistent=False, # <-- Keyboard tidak persisten
-        one_time_keyboard=False # Bisa dipanggil lagi
+        is_persistent=False,
+        one_time_keyboard=False
     )
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
-    message = f"👋 Halo, **{user_name}**!\n\n🤖 **GitHub Asset Generator Bot**\n🔥 AI: Multi-Provider (Latency Based)\n\n**Quick Actions:**\n• 🎲 Random - Generate persona acak\n• 📋 List Persona - Pilih persona spesifik\n• 📧 Dot Trick - Generate variasi Gmail acak\n• ℹ️ Info - Tentang bot\n• 📊 Stats - Status AI keys & Dot Trick\n\n_Tap ikon menu keyboard jika perlu._" # Update AI info
+    message = f"👋 Halo, **{user_name}**!\n\n🤖 **GitHub Asset Generator Bot**\n🔥 Model: Manual Fallback\n\n**Quick Actions:**\n• 🎲 Random - Generate persona acak\n• 📋 List Persona - Pilih persona spesifik\n• 📧 Dot Trick - Generate variasi Gmail acak\n• ℹ️ Info - Tentang bot\n• 📊 Stats - Status AI keys & Dot Trick\n\n_Tap ikon menu keyboard jika perlu._"
     await update.message.reply_text(message, reply_markup=get_main_keyboard(), parse_mode='Markdown')
 
 async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Mention multiple providers
-    message = "ℹ️ **GitHub Asset Generator Bot**\n\nBot ini menggunakan AI (Gemini, Cohere, Mistral, dll. via Router) untuk generate:\n• Profile data developer realistis\n• README.md profesional\n• Code snippets & scripts\n• Config files\n• Dotfiles\n• Gmail dot trick variations (1 acak per klik)\n\n**AI Models:**\n• Menggunakan LiteLLM Router untuk memilih model tercepat dari provider yang dikonfigurasi.\n\n**Send Methods:**\n• Text: Code block di chat\n\nMethod dipilih otomatis sesuai persona type."
+    message = "ℹ️ **GitHub Asset Generator Bot**\n\nBot ini menggunakan AI untuk generate:\n• Profile data developer realistis\n• README.md profesional\n• Code snippets & scripts\n• Config files\n• Dotfiles\n• Gmail dot trick variations (1 acak per klik)\n\n**AI Models:**\n• LiteLLM Manual Fallback (Multiple Providers)\n\n**Send Methods:**\n• Text: Code block di chat\n\nMethod dipilih otomatis sesuai persona type."
     await update.message.reply_text(message, parse_mode='Markdown', reply_markup=get_main_keyboard())
 
+# === HANDLER STATS DIPERBAIKI ===
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Update to show router info? LiteLLM router doesn't easily expose simple stats like KeyPool did.
-    # Keep it simple for now, just show Gemini if keys exist & Dot Trick stats.
-    from .services.llm_service import GEMINI_API_KEYS # Check if keys exist
     message = "📊 **Bot Statistics**\n\n"
-    if GEMINI_API_KEYS: # Check Gemini keys existence as a proxy for AI being configured
-         # Could add more checks for other providers if needed
-         message += "**AI Providers (via LiteLLM Router):**\n"
-         message += "• Status: Router Active (Latency-based)\n"
-         # Note: Detailed key status per provider is complex with Router
-         # message += f"• Gemini Keys Configured: {len(GEMINI_API_KEYS)}\n\n" # Example
+    # Info AI dari jumlah call options yang di-load
+    num_options = len(llm_call_options)
+    if num_options > 0:
+        message += f"**LiteLLM (Manual Fallback):**\n• Total Call Options: {num_options}\n(Kombinasi model + API key)\n\n"
     else:
-        message += "**AI Providers:**\n• No valid AI keys detected in config.\n\n"
+        message += "**LiteLLM (Manual Fallback):**\n• No call options loaded. Check config/models.\n\n"
 
-    stats = get_stats() # Fungsi ini dari modules.gmail_trick
-    message += f"**Gmail Dot Trick:**\n• Total Emails (gmail.txt): {stats['total_emails_in_file']}\n• Emails with History: {stats['emails_with_variations']}\n• Total Variations Generated: {stats['total_variations_generated']}\n\n"
-    message += "_Router automatically manages API keys & fallback._"
+    # Info Dot Trick (tidak berubah)
+    stats_gmail = get_stats()
+    message += f"**Gmail Dot Trick:**\n• Total Emails (data/gmail.txt): {stats_gmail['total_emails_in_file']}\n• Emails with History: {stats_gmail['emails_with_variations']}\n• Total Variations Generated: {stats_gmail['total_variations_generated']}\n\n"
+    # message += "_Failed keys akan auto-reset setelah cooldown_" # Info ini tidak relevan lagi
     await update.message.reply_text(message, parse_mode='Markdown', reply_markup=get_main_keyboard())
-
+# === AKHIR PERBAIKAN ===
 
 async def dot_trick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tampilkan list email dari gmail.txt tanpa status."""
     try:
         all_emails = load_gmail_list()
-        if not all_emails:
-            # Pastikan target reply ada
-            reply_target = update.message if hasattr(update, 'message') else update
-            await reply_target.reply_text("⚠️ **File gmail.txt tidak ditemukan atau kosong!**", reply_markup=get_main_keyboard()); return
-
+        if not all_emails: await update.message.reply_text("⚠️ **File data/gmail.txt tidak ditemukan atau kosong!**", reply_markup=get_main_keyboard()); return
         keyboard = []
         for i, email in enumerate(all_emails[:30]): keyboard.append([InlineKeyboardButton(f"{email[:35]}", callback_data=f"dottrick_{i}")])
         if len(all_emails) > 30: keyboard.append([InlineKeyboardButton(f"... +{len(all_emails)-30} more emails", callback_data="dummy")])
         keyboard.append([InlineKeyboardButton("📊 View Stats", callback_data="dottrick_stats")]); keyboard.append([InlineKeyboardButton("❌ Batal", callback_data="cancel")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-
-        # Target edit/reply adalah message asli
-        edit_target = update.message if hasattr(update, 'message') else update
-        try:
-            # Coba edit jika ini dari callback 'backtolist'
-            await edit_target.edit_text(f"📧 **Pilih Email untuk Generate Variasi Acak:**\n\n_Setiap klik akan menghasilkan 1 variasi baru._", reply_markup=reply_markup, parse_mode='Markdown')
-        except AttributeError: # Jika dipanggil dari command / text, gunakan reply_text
-            await edit_target.reply_text(f"📧 **Pilih Email untuk Generate Variasi Acak:**\n\n_Setiap klik akan menghasilkan 1 variasi baru._", reply_markup=reply_markup, parse_mode='Markdown')
-        except Exception as e_edit: # Tangkap error edit lain
-             logger.warning(f"Failed to edit message in dot_trick_handler: {e_edit}. Replying instead.")
-             await edit_target.reply_text(f"📧 **Pilih Email untuk Generate Variasi Acak:**\n\n_Setiap klik akan menghasilkan 1 variasi baru._", reply_markup=reply_markup, parse_mode='Markdown')
-
+        edit_target = update.message if hasattr(update, 'message') else update # Handle potential callback query update
+        await edit_target.reply_text(f"📧 **Pilih Email untuk Generate Variasi Acak:**\n\n_Setiap klik akan menghasilkan 1 variasi baru._", reply_markup=reply_markup, parse_mode='Markdown')
     except Exception as e:
         logger.error(f"Error di dot_trick_handler: {e}", exc_info=True)
         reply_target = update.message if hasattr(update, 'message') else update
-        await reply_target.reply_text(f"❌ Error memuat list email: {str(e)}", reply_markup=get_main_keyboard())
+        await reply_target.reply_text(f"❌ Error: {str(e)}", reply_markup=get_main_keyboard())
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle pesan teks biasa."""
-    if not update.message or not update.message.text: return # Abaikan jika tidak ada teks
     text = update.message.text.strip()
-
     if text == "🎲 Random":
         persona_type = random.choice(ALL_PERSONAS)
         await update.message.reply_text(f"⏳ Generating random persona: **{persona_type.replace('_', ' ').title()}**...", parse_mode='Markdown')
-        # Jalankan di background
+        # Jalankan task di background thread
         context.application.create_task(trigger_generation_task(update.message.chat_id, persona_type))
     elif text == "📋 List Persona":
-        # Buat tombol inline
         keyboard = [[InlineKeyboardButton(p.replace('_', ' ').title(), callback_data=f"persona_{p}")] for p in ALL_PERSONAS]
         keyboard.append([InlineKeyboardButton("❌ Batal", callback_data="cancel")])
         await update.message.reply_text("📋 **Pilih Persona:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    elif text == "📧 Dot Trick":
-        await dot_trick_handler(update, context) # Panggil handler dot trick
-    elif text == "ℹ️ Info":
-        await info_handler(update, context) # Panggil handler info
-    elif text == "📊 Stats":
-        await stats_handler(update, context) # Panggil handler stats
-    # Abaikan teks lain yang tidak cocok
+    elif text == "📧 Dot Trick": await dot_trick_handler(update, context)
+    elif text == "ℹ️ Info": await info_handler(update, context)
+    elif text == "📊 Stats": await stats_handler(update, context)
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle tombol inline."""
     query = update.callback_query
-    if not query or not query.data: return # Abaikan jika tidak ada data
-
-    try:
-        await query.answer() # Jawab callback secepatnya
-    except Exception as e:
-        logger.warning(f"Failed to answer callback query {query.id}: {e}")
+    try: await query.answer() # Jawab callback secepat mungkin
+    except Exception as e: logger.warning(f"Failed to answer callback query: {e}")
 
     data = query.data
 
     if data == "cancel":
-        try: await query.edit_message_text("❌ Operasi dibatalkan.", reply_markup=None)
-        except Exception: await query.message.reply_text("❌ Operasi dibatalkan.", reply_markup=get_main_keyboard()); return
+        try: await query.edit_message_text("❌ Dibatalkan.", reply_markup=None)
+        except Exception: # Fallback jika edit gagal (misal pesan terlalu lama)
+             await query.message.reply_text("❌ Dibatalkan.", reply_markup=get_main_keyboard())
+        return # Stop processing
     elif data == "dummy":
-        await query.answer("⚠️ Terlalu banyak item untuk ditampilkan semua.", show_alert=True); return
+        await query.answer("⚠️ Terlalu banyak email, tampilkan hanya 30 pertama", show_alert=True)
+        return
     elif data == "random_generate":
-        persona_type = random.choice(ALL_PERSONAS); await trigger_generation(query, persona_type, context)
+        persona_type = random.choice(ALL_PERSONAS)
+        await trigger_generation(query, persona_type, context)
     elif data.startswith("persona_"):
-        persona_type = data.replace("persona_", ""); await trigger_generation(query, persona_type, context)
+        persona_type = data.replace("persona_", "")
+        await trigger_generation(query, persona_type, context)
     elif data == "dottrick_stats":
-        await show_dot_trick_stats(query) # Panggil fungsi stats
+        await show_dot_trick_stats(query) # Handle stats view
     elif data.startswith("dottrick_"):
-        try: index = int(data.replace("dottrick_", "")); await trigger_dot_trick_generation(query, index, context)
-        except ValueError: logger.warning(f"Invalid dottrick index in callback data: {data}")
+        index = int(data.replace("dottrick_", ""))
+        await trigger_dot_trick_generation(query, index, context) # Handle generation
 
 async def trigger_generation(query, persona_type: str, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger AI persona generation (setelah tombol persona ditekan)."""
     chat_id = query.message.chat_id
-    persona_display = persona_type.replace('_', ' ').title()
     try:
-        await query.edit_message_text(f"⏳ **Generating: {persona_display}**\n\n_AI Chaining in progress... Please wait._", parse_mode='Markdown', reply_markup=None)
+        # Edit pesan inline keyboard jadi teks loading
+        await query.edit_message_text(f"⏳ **Generating: {persona_type.replace('_', ' ').title()}**\n\n_AI Chaining in progress..._", parse_mode='Markdown', reply_markup=None)
     except Exception as e:
-        logger.warning(f"Failed to edit message on trigger_generation: {e}")
-        # Kirim pesan baru jika edit gagal (misal: pesan terlalu lama)
-        await context.bot.send_message(chat_id=chat_id, text=f"⏳ **Generating: {persona_display}**...", parse_mode='Markdown')
-    # Jalankan task utama di background
+        # Fallback jika edit gagal
+        logger.warning(f"Failed to edit message: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=f"⏳ **Generating: {persona_type.replace('_', ' ').title()}**...", parse_mode='Markdown')
+
+    # Jalankan task generate di background thread
     context.application.create_task(trigger_generation_task(chat_id, persona_type))
 
 async def trigger_generation_task(chat_id: int, persona_type: str):
-    """Run AI persona generation in background."""
-    logger.info(f"Starting generation task for persona: {persona_type}, chat_id: {chat_id}")
+    """Jalankan generate_persona_data di thread terpisah."""
     try:
+        # Panggil fungsi blocking (call_llm) via to_thread
         data = await asyncio.to_thread(generate_persona_data, persona_type)
         if not data:
-            logger.error(f"AI generation failed for persona: {persona_type}")
-            await asyncio.to_thread(send_text_message, "❌ AI generation failed. Check worker logs for details.", str(chat_id))
+            # Kirim pesan error jika generate gagal
+            await asyncio.to_thread(send_text_message, "❌ AI generation failed. Check logs.", str(chat_id))
             return
-        logger.info(f"AI generation successful for persona: {persona_type}. Sending to Telegram...")
+        # Kirim hasil jika sukses
         await asyncio.to_thread(send_persona_to_telegram, persona_type, data, str(chat_id))
     except Exception as e:
-        logger.error(f"Error in trigger_generation_task for {persona_type}: {e}", exc_info=True)
-        await asyncio.to_thread(send_text_message, f"❌ An error occurred during generation: {str(e)[:200]}", str(chat_id))
+        logger.error(f"Error in trigger_generation_task: {e}", exc_info=True)
+        # Kirim pesan error umum
+        await asyncio.to_thread(send_text_message, f"❌ Error: {str(e)[:200]}", str(chat_id))
 
 async def trigger_dot_trick_generation(query, index: int, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger dot trick generation (setelah tombol email ditekan)."""
-    chat_id = str(query.message.chat_id);
+    chat_id = str(query.message.chat_id)
+    gmail_list = load_gmail_list()
+    if index >= len(gmail_list):
+        await query.answer("❌ Email index tidak valid", show_alert=True)
+        return
+    email = gmail_list[index]
     try:
-        gmail_list = load_gmail_list()
-        if index >= len(gmail_list):
-            await query.answer("❌ Email index tidak valid.", show_alert=True); return
-        email = gmail_list[index]
-    except Exception as e:
-        logger.error(f"Error getting email for dot trick index {index}: {e}")
-        await query.answer("❌ Gagal memproses pilihan email.", show_alert=True); return
-
-    try:
+        # Edit pesan inline keyboard jadi teks loading
         await query.edit_message_text(f"⏳ **Generating variasi acak untuk:**\n`{email}`\n\n_Processing..._", parse_mode='Markdown', reply_markup=None)
     except Exception as e:
-        logger.warning(f"Failed to edit message on trigger_dot_trick_generation: {e}")
+        logger.warning(f"Failed to edit message: {e}")
         await context.bot.send_message(chat_id=chat_id, text=f"⏳ Generating variasi acak untuk: `{email}`...", parse_mode='Markdown')
-    # Jalankan task utama di background
+
+    # Jalankan task dot trick di background thread
     context.application.create_task(run_dot_trick_task(email=email, chat_id=chat_id))
 
 async def show_dot_trick_stats(query):
-    """Tampilkan statistik dot trick."""
+    """Tampilkan stats dot trick di pesan inline."""
+    stats_gmail = get_stats()
+    message = f"📊 **Gmail Dot Trick Statistics**\n\n"
+    message += f"📧 Total Emails (data/gmail.txt): {stats_gmail['total_emails_in_file']}\n"
+    message += f"📈 Emails with Variations: {stats_gmail['emails_with_variations']}\n"
+    message += f"🔢 Total Variations Generated: {stats_gmail['total_variations_generated']}\n\n"
+    keyboard = [[InlineKeyboardButton("🔙 Kembali ke List Email", callback_data="dottrick_backtolist")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     try:
-        stats = get_stats()
-        message = f"📊 **Gmail Dot Trick Statistics**\n\n📧 Total Emails (gmail.txt): {stats['total_emails_in_file']}\n📈 Emails with Variations: {stats['emails_with_variations']}\n🔢 Total Variations Generated: {stats['total_variations_generated']}\n\n"
-        keyboard = [[InlineKeyboardButton("🔙 Kembali ke List Email", callback_data="dottrick_backtolist")]]; reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Error showing dot trick stats: {e}", exc_info=True)
-        await query.answer("❌ Gagal memuat statistik.", show_alert=True)
-        # Coba kirim pesan error jika edit gagal
-        try: await query.message.reply_text("❌ Gagal memuat statistik dot trick.")
-        except Exception: pass
+        logger.warning(f"Failed to edit message for stats: {e}")
+        # Fallback jika edit gagal
+        await query.message.reply_text(message, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def handle_dottrick_backtolist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kembali ke menu pemilihan email dot trick dari stats."""
-    query = update.callback_query;
-    if not query: return
+    """Kembali ke list email dari view stats."""
+    query = update.callback_query
     await query.answer()
     try:
-        # Edit pesan sebelum memanggil handler utama
+        # Tampilkan pesan loading sementara
         await query.edit_message_text("🔄 Memuat ulang list email...", reply_markup=None)
-    except Exception as e:
-        logger.warning(f"Failed to edit message on backtolist: {e}")
-        # Jika edit gagal, coba kirim pesan baru sbg indikator
-        await query.message.reply_text("Memuat list email...")
-
-    # Panggil handler utama dot trick, gunakan message object dari query
+    except Exception:
+        pass # Abaikan jika edit gagal
+    # Panggil handler asli untuk menampilkan list lagi
+    # Perlu message object, bukan query object
     await dot_trick_handler(query.message, context)
 
+
 async def run_dot_trick_task(email: str, chat_id: str):
-    """Generate 1 variasi acak, simpan history, kirim ke Telegram."""
+    """Jalankan logika dot trick di thread terpisah."""
     try:
-        logger.info(f"Running dot trick task for {email}")
+        # Panggil fungsi blocking via to_thread
         existing_variations = await asyncio.to_thread(get_generated_variations, email)
         new_variation = await asyncio.to_thread(generate_dot_tricks, email, existing_variations)
+
         if new_variation:
+            # Panggil fungsi blocking via to_thread
             await asyncio.to_thread(add_variation_to_history, email, new_variation)
             message = f"✅ **Variasi Gmail Dot Trick Baru**\n\n📧 Original: `{email}`\n🆕 Variasi: `{new_variation}`"
-            logger.info(f"Successfully generated dot trick for {email}: {new_variation}")
         else:
-            message = f"⚠️ **Gagal Generate Variasi**\n\n📧 Email: `{email}`\n❌ Username mungkin terlalu pendek atau tidak ada variasi baru ditemukan."
-            logger.warning(f"Failed to generate new dot trick variation for {email}")
+            message = f"⚠️ **Gagal Generate Variasi**\n\n📧 Email: `{email}`\n❌ Username mungkin terlalu pendek atau error terjadi."
+
+        # Kirim hasil via to_thread
         await asyncio.to_thread(send_text_message, message, chat_id)
     except Exception as e:
         logger.error(f"Error in run_dot_trick_task for {email}: {e}", exc_info=True)
+        # Kirim pesan error via to_thread
         await asyncio.to_thread(send_text_message, f"❌ Error generating dot trick for `{email}`: {str(e)[:200]}", chat_id)
 
+
 async def setup_bot_commands(app: Application):
-    """Setel command bot."""
+    """Set custom bot commands."""
     commands = [
-        BotCommand("start","Mulai bot & tampilkan menu"),
-        BotCommand("info","Info tentang bot"),
-        BotCommand("stats","Status AI & Dot Trick")
+        BotCommand("start", "Mulai bot & tampilkan menu"),
+        BotCommand("info", "Info tentang bot"),
+        BotCommand("stats", "Status AI keys & Dot Trick")
     ]
-    try:
-        await app.bot.set_my_commands(commands)
-        logger.info("Bot commands updated successfully.")
-    except Exception as e:
-        logger.error(f"Failed to set bot commands: {e}")
+    await app.bot.set_my_commands(commands)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Handle error global."""
+    """Log errors caused by updates."""
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
-    # Coba kirim pesan error ke user jika memungkinkan
-    if isinstance(update, Update) and update.effective_chat:
-         try:
-             await context.bot.send_message(
-                 chat_id=update.effective_chat.id,
-                 text=f"❌ Terjadi error internal. Cek log worker untuk detail."
-             )
-         except Exception as e_send:
-              logger.error(f"Failed to send error message to chat {update.effective_chat.id}: {e_send}")
-
 
 def main():
-    """Fungsi utama untuk worker bot."""
+    """Start the bot."""
     try:
-        logger.info("=== Initializing Bot Worker (Subprocess) ===")
-        validate_config() # Validasi config dari config.py
+        logger.info("=== Inisialisasi Bot Worker (Subprocess) ===")
+        validate_config() # Validasi config dulu
 
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-        # Tambahkan handlers
+        # Add handlers
         application.add_handler(CommandHandler("start", start_handler))
         application.add_handler(CommandHandler("info", info_handler))
         application.add_handler(CommandHandler("stats", stats_handler))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-        # Handler callback spesifik harus SEBELUM handler umum
+        # Handler callback query harus spesifik pattern-nya ATAU pakai satu handler umum
         application.add_handler(CallbackQueryHandler(handle_dottrick_backtolist, pattern="^dottrick_backtolist$"))
-        application.add_handler(CallbackQueryHandler(callback_handler)) # Handler umum terakhir
+        application.add_handler(CallbackQueryHandler(callback_handler)) # Handler umum untuk callback lain
+
+        # Add error handler
         application.add_error_handler(error_handler)
 
-        # Setel command setelah init
+        # Set bot commands (run async after init)
         application.post_init = setup_bot_commands
 
-        logger.info("🚀 Bot worker ready. Starting polling...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES) # Poll semua jenis update
-
-    except ImportError as e:
-         logger.critical(f"ImportError during initialization: {e}. Make sure all dependencies are installed.")
-         sys.exit(1)
+        logger.info("🚀 Bot worker siap. Memulai polling...")
+        application.run_polling()
     except Exception as e:
-        logger.critical(f"FATAL ERROR during worker initialization or runtime: {e}", exc_info=True)
+        logger.critical(f"FATAL ERROR (Worker): {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":
