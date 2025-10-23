@@ -11,6 +11,7 @@ groq # Optional
 
 # Telegram Bot
 python-telegram-bot
+apscheduler
 
 # HTTP Requests
 requests
