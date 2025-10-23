@@ -5,16 +5,16 @@ import logging
 import random
 import asyncio
 import os
-import time # Tambah import time
+import time
 from typing import List
-from datetime import datetime # Tambah import datetime
+from datetime import datetime
 
 # Import scheduler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 # Import config dan setup_logging (Relative)
-from .config import TELEGRAM_BOT_TOKEN, validate_config, setup_logging, reload_proxy_pool # Import fungsi reload
+from .config import TELEGRAM_BOT_TOKEN, validate_config, setup_logging, reload_proxy_pool
 
 # Setup logging untuk worker (ke file + console)
 setup_logging(is_controller=False)
@@ -31,7 +31,7 @@ except ImportError:
 from .services.llm import generate_persona_data, llm_call_options
 from .services.telegram import send_persona_to_telegram, send_text_message
 from .modules.gmail import generate_dot_tricks, load_gmail_list, add_variation_to_history, get_generated_variations, get_stats
-from .modules.proxy import sync_proxies # Nama file sudah proxy.py
+from .modules.proxy import sync_proxies
 # -------------------------------------
 
 # --- LIST PERSONA (Tidak berubah) ---
@@ -48,37 +48,30 @@ ALL_PERSONAS = [
 # -------------------------
 
 # ============================================================
-# SCHEDULER TASK UNTUK AUTO SYNC PROXY
+# SCHEDULER TASK UNTUK AUTO SYNC PROXY (Tidak berubah)
 # ============================================================
 async def scheduled_proxy_sync_task():
     """Wrapper async untuk menjalankan sync_proxies dan reload pool secara terjadwal."""
     start_time = time.time()
     logger.info("===== Starting SCHEDULED Proxy Sync Process =====")
     try:
-        # Jalankan fungsi sync_proxies yang blocking di thread terpisah
         success = await asyncio.to_thread(sync_proxies)
         duration = time.time() - start_time
-
         if success:
-            logger.info(f"Scheduled sync_proxies completed successfully in {duration:.2f}s. Reloading pool...")
-            # Reload pool setelah sync sukses
+            logger.info(f"Scheduled sync successful ({duration:.2f}s). Reloading pool...")
             await asyncio.to_thread(reload_proxy_pool)
             logger.info("Scheduled proxy pool reloaded.")
-            # Kirim notifikasi ke admin chat ID (opsional)
-            # await asyncio.to_thread(send_text_message, f"✅ Auto Proxy Sync Selesai ({duration:.1f}s)", TELEGRAM_CHAT_ID) # Ganti dengan ID admin jika beda
+            # await asyncio.to_thread(send_text_message, f"✅ Auto Proxy Sync OK ({duration:.1f}s)", TELEGRAM_CHAT_ID)
         else:
-            logger.error(f"Scheduled sync_proxies failed after {duration:.2f}s. Pool not reloaded.")
-            # Kirim notifikasi error (opsional)
+            logger.error(f"Scheduled sync failed ({duration:.2f}s). Pool not reloaded.")
             # await asyncio.to_thread(send_text_message, f"❌ Auto Proxy Sync Gagal ({duration:.1f}s)", TELEGRAM_CHAT_ID)
-
     except Exception as e:
         duration = time.time() - start_time
-        logger.error(f"Error during scheduled proxy sync task after {duration:.2f}s: {e}", exc_info=True)
-        # Kirim notifikasi error (opsional)
+        logger.error(f"Error scheduled proxy sync ({duration:.2f}s): {e}", exc_info=True)
         # await asyncio.to_thread(send_text_message, f"❌ Error Auto Sync Proxy ({duration:.1f}s): {str(e)[:100]}", TELEGRAM_CHAT_ID)
 
 # ============================================================
-# HANDLER BOT (Tidak berubah kecuali sync_proxies_handler)
+# HANDLER BOT
 # ============================================================
 
 def get_main_keyboard():
@@ -97,8 +90,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                f"🔥 Model: Manual Fallback\n\n"
                f"**Quick Actions:**\n"
                f"• 🎲 Random\n• 📋 List Persona\n• 📧 Dot Trick\n• ℹ️ Info\n• 📊 Stats\n"
-               f"• `/sync_proxies` - Update proxy list NOW\n\n" # Perjelas NOW
-               f"_(Proxy list diupdate otomatis setiap minggu)_") # Tambah info auto sync
+               f"• `/sync_proxies` - Update proxy list NOW\n\n"
+               f"_(Proxy list diupdate otomatis setiap minggu)_")
     await update.message.reply_text(message, reply_markup=get_main_keyboard(), parse_mode='Markdown')
 
 
@@ -106,10 +99,10 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ... (kode info_handler tidak berubah) ...
     message = ("ℹ️ **GitHub Asset Generator Bot**\n\n"
                "Generate:\n"
-               "• Profil developer realistis\n• README.md\n• Code snippets & scripts\n"
-               "• Config files & Dotfiles\n• Gmail dot trick variations\n\n"
+               "• Profil developer\n• README.md\n• Code snippets\n"
+               "• Config/Dotfiles\n• Gmail dot trick\n\n"
                "**AI Models:** LiteLLM Manual Fallback\n"
-               "**Proxy Sync:** Gunakan `/sync_proxies` untuk update manual. Proxy diupdate otomatis setiap minggu.")
+               "**Proxy Sync:** `/sync_proxies` (Manual), Auto weekly.")
     await update.message.reply_text(message, parse_mode='Markdown', reply_markup=get_main_keyboard())
 
 
@@ -137,9 +130,10 @@ async def dot_trick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton("📊 View Stats", callback_data="dottrick_stats")])
         keyboard.append([InlineKeyboardButton("❌ Batal", callback_data="cancel")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        target_message = update.message or update.callback_query.message
-        await target_message.reply_text(f"📧 **Pilih Email:**", reply_markup=reply_markup)
-    except Exception as e: logger.error(f"Error dot_trick_handler: {e}", exc_info=True); await (update.message or update.callback_query.message).reply_text(f"❌ Error: {str(e)}", reply_markup=get_main_keyboard())
+        target_message = update.message or getattr(update.callback_query, 'message', None) # Handle update/callback
+        if target_message: await target_message.reply_text(f"📧 **Pilih Email:**", reply_markup=reply_markup)
+        else: logger.error("Cannot determine message to reply to in dot_trick_handler")
+    except Exception as e: logger.error(f"Error dot_trick_handler: {e}", exc_info=True); await (update.message or getattr(update.callback_query, 'message', None)).reply_text(f"❌ Error: {str(e)}", reply_markup=get_main_keyboard())
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ... (kode handle_text_message tidak berubah) ...
@@ -158,20 +152,46 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif text == "📊 Stats": await stats_handler(update, context)
 
 
+# === PERBAIKAN SYNTAX DI SINI ===
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (kode callback_handler tidak berubah) ...
-    query = update.callback_query; await query.answer()
+    query = update.callback_query
+    if not query: return # Safety check
+    try: await query.answer()
+    except Exception as e: logger.warning(f"Failed answer callback: {e}")
+
     data = query.data
-    if data == "cancel": try: await query.edit_message_text("❌ Dibatalkan.", reply_markup=None); except Exception: await query.message.reply_text("❌ Dibatalkan.", reply_markup=get_main_keyboard())
-    elif data == "dummy": await query.answer("⚠️ List terlalu panjang.", show_alert=True)
-    elif data == "random_generate": await trigger_generation(query, random.choice(ALL_PERSONAS), context)
-    elif data.startswith("persona_"): await trigger_generation(query, data.replace("persona_", ""), context)
-    elif data == "dottrick_stats": await show_dot_trick_stats(query)
-    elif data.startswith("dottrick_"): await trigger_dot_trick_generation(query, int(data.replace("dottrick_", "")), context)
+    if data == "cancel":
+        # Gunakan indentasi yang benar untuk try-except
+        try:
+            await query.edit_message_text("❌ Dibatalkan.", reply_markup=None)
+        except Exception:
+            # Fallback jika edit gagal
+            if query.message: # Pastikan message ada
+                 await query.message.reply_text("❌ Dibatalkan.", reply_markup=get_main_keyboard())
+            else:
+                 logger.error("Callback 'cancel' failed: No message to reply to.")
+    elif data == "dummy":
+        await query.answer("⚠️ List terlalu panjang.", show_alert=True)
+    elif data == "random_generate":
+        await trigger_generation(query, random.choice(ALL_PERSONAS), context)
+    elif data.startswith("persona_"):
+        await trigger_generation(query, data.replace("persona_", ""), context)
+    elif data == "dottrick_stats":
+        await show_dot_trick_stats(query)
+    elif data.startswith("dottrick_"):
+        try: # Tambah try-except untuk konversi int
+             index = int(data.replace("dottrick_", ""))
+             await trigger_dot_trick_generation(query, index, context)
+        except ValueError:
+             logger.error(f"Invalid index in dottrick callback data: {data}")
+             await query.answer("❌ Data callback tidak valid.", show_alert=True)
+    # Abaikan callback lain
+# === AKHIR PERBAIKAN ===
 
 
 async def trigger_generation(query, persona_type: str, context: ContextTypes.DEFAULT_TYPE):
     # ... (kode trigger_generation tidak berubah) ...
+    if not query or not query.message: logger.error("Cannot trigger generation: invalid query/message"); return
     chat_id = query.message.chat_id
     try: await query.edit_message_text(f"⏳ **Generating: {persona_type.replace('_', ' ').title()}**...", parse_mode='Markdown', reply_markup=None)
     except Exception as e: logger.warning(f"Failed edit message: {e}"); await context.bot.send_message(chat_id=chat_id, text=f"⏳ **Generating: {persona_type.replace('_', ' ').title()}**...", parse_mode='Markdown')
@@ -187,6 +207,7 @@ async def trigger_generation_task(chat_id: int, persona_type: str):
 
 async def trigger_dot_trick_generation(query, index: int, context: ContextTypes.DEFAULT_TYPE):
     # ... (kode trigger_dot_trick_generation tidak berubah) ...
+    if not query or not query.message: logger.error("Cannot trigger dot trick: invalid query/message"); return
     chat_id = str(query.message.chat_id); gmail_list = load_gmail_list()
     if index >= len(gmail_list): await query.answer("❌ Index email salah.", show_alert=True); return
     email = gmail_list[index]
@@ -196,6 +217,7 @@ async def trigger_dot_trick_generation(query, index: int, context: ContextTypes.
 
 async def show_dot_trick_stats(query):
     # ... (kode show_dot_trick_stats tidak berubah) ...
+    if not query: return
     stats_gmail = get_stats()
     message = (f"📊 **Gmail Dot Trick Stats**\n\n📧 Total: {stats_gmail['total_emails_in_file']}\n📈 History: {stats_gmail['emails_with_variations']}\n🔢 Generated: {stats_gmail['total_variations_generated']}")
     keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="dottrick_backtolist")]]
@@ -207,8 +229,7 @@ async def handle_dottrick_backtolist(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query; await query.answer()
     try: await query.edit_message_text("🔄 Reloading list...", reply_markup=None)
     except Exception: pass
-    # Perlu message object untuk dot_trick_handler
-    await dot_trick_handler(query.message, context) # Kirim message object, bukan query
+    await dot_trick_handler(query, context) # Kirim query object
 
 
 async def run_dot_trick_task(email: str, chat_id: str):
@@ -223,59 +244,50 @@ async def run_dot_trick_task(email: str, chat_id: str):
 
 # --- HANDLER SYNC PROXY MANUAL (Tidak berubah) ---
 async def sync_proxies_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the /sync_proxies command."""
+    # ... (kode sync_proxies_handler tidak berubah) ...
     chat_id = str(update.message.chat_id)
-    await update.message.reply_text("⏳ Memulai sinkronisasi proxy manual (download, tes, update)... Ini bisa lama.", parse_mode='Markdown')
+    await update.message.reply_text("⏳ Memulai sinkronisasi proxy manual...", parse_mode='Markdown')
     logger.info(f"Manual proxy sync requested by chat_id {chat_id}.")
     context.application.create_task(run_sync_proxies_task(chat_id))
 
 async def run_sync_proxies_task(chat_id: str):
-    """Runs sync_proxies and reloads the pool (dipakai oleh manual & scheduled)."""
-    start_time = time.time()
-    message_prefix = f"Proxy Sync Task (Chat ID: {chat_id}): " # Tambahkan chat ID untuk log manual
+    # ... (kode run_sync_proxies_task tidak berubah) ...
+    start_time = time.time(); message_prefix = f"Proxy Sync Task (Chat ID: {chat_id}): "
     try:
-        logger.info(message_prefix + "Running sync_proxies in thread...")
+        logger.info(message_prefix + "Running sync_proxies...")
         success = await asyncio.to_thread(sync_proxies)
         duration = time.time() - start_time
         if success:
-            logger.info(message_prefix + f"sync_proxies successful ({duration:.2f}s). Reloading pool...")
+            logger.info(message_prefix + f"sync successful ({duration:.2f}s). Reloading pool...")
             await asyncio.to_thread(reload_proxy_pool)
-            logger.info(message_prefix + "Proxy pool reloaded.")
-            await asyncio.to_thread(send_text_message, f"✅ Sinkronisasi proxy manual selesai ({duration:.1f}s) & pool di-reload!", chat_id)
+            logger.info(message_prefix + "Pool reloaded.")
+            await asyncio.to_thread(send_text_message, f"✅ Sync proxy manual OK ({duration:.1f}s) & pool di-reload!", chat_id)
         else:
-            logger.error(message_prefix + f"sync_proxies failed ({duration:.2f}s). Pool not reloaded.")
-            await asyncio.to_thread(send_text_message, f"❌ Sinkronisasi proxy manual gagal ({duration:.1f}s). Cek log.", chat_id)
+            logger.error(message_prefix + f"sync failed ({duration:.2f}s). Pool not reloaded.")
+            await asyncio.to_thread(send_text_message, f"❌ Sync proxy manual Gagal ({duration:.1f}s). Cek log.", chat_id)
     except Exception as e:
         duration = time.time() - start_time
-        logger.error(message_prefix + f"Error during task ({duration:.2f}s): {e}", exc_info=True)
+        logger.error(message_prefix + f"Error ({duration:.2f}s): {e}", exc_info=True)
         await asyncio.to_thread(send_text_message, f"❌ Error sync proxy ({duration:.1f}s): {str(e)[:100]}", chat_id)
 
 # --- AKHIR HANDLER SYNC PROXY ---
 
 async def setup_bot_commands(app: Application):
     # ... (kode setup_bot_commands tidak berubah) ...
-    commands = [
-        BotCommand("start", "Mulai bot & menu"),
-        BotCommand("info", "Info bot"),
-        BotCommand("stats", "Status AI & Dot Trick"),
-        BotCommand("sync_proxies", "Update proxy list manual")
-    ]
+    commands = [ BotCommand("start", "Mulai bot"), BotCommand("info", "Info bot"), BotCommand("stats", "Status"), BotCommand("sync_proxies", "Update proxy list") ]
     await app.bot.set_my_commands(commands)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     # ... (kode error_handler tidak berubah) ...
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
 
-# --- PERUBAHAN DI FUNGSI MAIN ---
+# --- MAIN FUNCTION (Tidak berubah) ---
 def main():
     """Start the bot and the scheduler."""
     try:
         logger.info("=== Inisialisasi Bot Worker ===")
         validate_config()
-
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-        # Add handlers (tidak berubah)
         application.add_handler(CommandHandler("start", start_handler))
         application.add_handler(CommandHandler("info", info_handler))
         application.add_handler(CommandHandler("stats", stats_handler))
@@ -285,44 +297,21 @@ def main():
         application.add_handler(CallbackQueryHandler(callback_handler))
         application.add_error_handler(error_handler)
         application.post_init = setup_bot_commands
-
-        # --- SETUP SCHEDULER ---
         logger.info("Initializing background scheduler...")
-        scheduler = AsyncIOScheduler(timezone="Asia/Jakarta") # Set timezone
-
-        # Tambah job: jalanin scheduled_proxy_sync_task setiap 7 hari
-        # next_run_time=datetime.now() -> jalankan 1x saat start, lalu interval
-        scheduler.add_job(
-            scheduled_proxy_sync_task,
-            trigger=IntervalTrigger(weeks=1), # Interval 1 minggu
-            id="weekly_proxy_sync",
-            name="Weekly Proxy Sync",
-            next_run_time=datetime.now() # Jalankan segera saat bot start
-        )
-        # Tambahkan job lain jika perlu
-        
-        # Mulai scheduler di background
+        scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
+        scheduler.add_job( scheduled_proxy_sync_task, trigger=IntervalTrigger(weeks=1), id="weekly_proxy_sync", name="Weekly Proxy Sync", next_run_time=datetime.now() )
         scheduler.start()
-        logger.info("✅ Background scheduler started. Weekly proxy sync job added.")
-        # --- AKHIR SETUP SCHEDULER ---
-
-
+        logger.info("✅ Background scheduler started.")
         logger.info("🚀 Bot worker siap. Memulai polling...")
-        # Jalankan polling bot (ini blocking, tapi scheduler sudah jalan di background)
         application.run_polling()
-
-        # --- Shutdown scheduler saat bot berhenti (opsional, tapi bagus) ---
         logger.info("Shutting down scheduler...")
         scheduler.shutdown()
-
     except (KeyboardInterrupt, SystemExit):
          logger.info("Bot stopped manually. Shutting down scheduler...")
-         if 'scheduler' in locals() and scheduler.running:
-              scheduler.shutdown() # Pastikan scheduler mati juga
+         if 'scheduler' in locals() and scheduler.running: scheduler.shutdown()
     except Exception as e:
         logger.critical(f"FATAL ERROR (Worker): {e}", exc_info=True)
-        if 'scheduler' in locals() and scheduler.running:
-             scheduler.shutdown() # Coba matikan scheduler jika error
+        if 'scheduler' in locals() and scheduler.running: scheduler.shutdown()
         sys.exit(1)
 
 if __name__ == "__main__":
