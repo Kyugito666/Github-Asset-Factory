@@ -197,4 +197,5 @@ def send_persona_to_telegram(persona_type: str, data: dict, chat_id: str = None)
         logger.warning(f"[!] Profile sent, but only {success_count}/{total_files} file(s) were sent successfully.")
         return False # Anggap gagal jika tidak semua file terkirim
 
-}
+# KESALAHAN ADA DI SINI SEBELUMNYA (ADA '}' TAMBAHAN)
+# VERSI INI SUDAH DIHAPUS
