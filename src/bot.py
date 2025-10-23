@@ -47,6 +47,13 @@ ALL_PERSONAS = [
 ]
 # -------------------------
 
+# === PERUBAHAN 1: Definisikan Scheduler di Global Scope ===
+# Kita definisikan di sini agar bisa diakses oleh main() (untuk shutdown)
+# dan setup_bot_commands() (untuk start)
+scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
+# =======================================================
+
+
 # ============================================================
 # SCHEDULER TASK UNTUK AUTO SYNC PROXY (Tidak berubah)
 # ============================================================
@@ -71,7 +78,7 @@ async def scheduled_proxy_sync_task():
         # await asyncio.to_thread(send_text_message, f"❌ Error Auto Sync Proxy ({duration:.1f}s): {str(e)[:100]}", TELEGRAM_CHAT_ID)
 
 # ============================================================
-# HANDLER BOT
+# HANDLER BOT (Tidak berubah)
 # ============================================================
 
 def get_main_keyboard():
@@ -152,8 +159,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif text == "📊 Stats": await stats_handler(update, context)
 
 
-# === PERBAIKAN SYNTAX DI SINI ===
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (kode callback_handler tidak berubah, perbaikan indentasi sudah ada) ...
     query = update.callback_query
     if not query: return # Safety check
     try: await query.answer()
@@ -161,12 +168,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     if data == "cancel":
-        # Gunakan indentasi yang benar untuk try-except
         try:
             await query.edit_message_text("❌ Dibatalkan.", reply_markup=None)
         except Exception:
-            # Fallback jika edit gagal
-            if query.message: # Pastikan message ada
+            if query.message: 
                  await query.message.reply_text("❌ Dibatalkan.", reply_markup=get_main_keyboard())
             else:
                  logger.error("Callback 'cancel' failed: No message to reply to.")
@@ -179,14 +184,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "dottrick_stats":
         await show_dot_trick_stats(query)
     elif data.startswith("dottrick_"):
-        try: # Tambah try-except untuk konversi int
+        try: 
              index = int(data.replace("dottrick_", ""))
              await trigger_dot_trick_generation(query, index, context)
         except ValueError:
              logger.error(f"Invalid index in dottrick callback data: {data}")
              await query.answer("❌ Data callback tidak valid.", show_alert=True)
-    # Abaikan callback lain
-# === AKHIR PERBAIKAN ===
 
 
 async def trigger_generation(query, persona_type: str, context: ContextTypes.DEFAULT_TYPE):
@@ -229,10 +232,8 @@ async def handle_dottrick_backtolist(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query; await query.answer()
     try: await query.edit_message_text("🔄 Reloading list...", reply_markup=None)
     except Exception: pass
-    # Perlu message object untuk dot_trick_handler
-    # Coba ambil dari query.message
     if query.message:
-        await dot_trick_handler(query.message, context) # Kirim message object
+        await dot_trick_handler(query.message, context) 
     else:
         logger.error("Cannot go back to dot trick list: query.message is None")
 
@@ -277,22 +278,53 @@ async def run_sync_proxies_task(chat_id: str):
 
 # --- AKHIR HANDLER SYNC PROXY ---
 
+
+# === PERUBAHAN 2: Modifikasi setup_bot_commands ===
 async def setup_bot_commands(app: Application):
-    # ... (kode setup_bot_commands tidak berubah) ...
-    commands = [ BotCommand("start", "Mulai bot"), BotCommand("info", "Info bot"), BotCommand("stats", "Status"), BotCommand("sync_proxies", "Update proxy list") ]
+    """Set bot commands AND start the scheduler."""
+    # (Kode setup command tidak berubah)
+    commands = [ 
+        BotCommand("start", "Mulai bot"), 
+        BotCommand("info", "Info bot"), 
+        BotCommand("stats", "Status"), 
+        BotCommand("sync_proxies", "Update proxy list") 
+    ]
     await app.bot.set_my_commands(commands)
+    
+    # === PINDAHKAN LOGIC START SCHEDULER KE SINI ===
+    logger.info("Initializing background scheduler via post_init...")
+    try:
+        if not scheduler.running:
+            # Tambahkan job di sini
+            scheduler.add_job( 
+                scheduled_proxy_sync_task, 
+                trigger=IntervalTrigger(weeks=1), 
+                id="weekly_proxy_sync", 
+                name="Weekly Proxy Sync", 
+                next_run_time=datetime.now() 
+            )
+            # Mulai scheduler
+            scheduler.start()
+            logger.info("✅ Background scheduler started.")
+        else:
+            logger.info("Scheduler already running (skipped start).")
+    except Exception as e:
+        logger.error(f"❌ Failed to start scheduler in post_init: {e}", exc_info=True)
+    # === AKHIR PERUBAHAN ===
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     # ... (kode error_handler tidak berubah) ...
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
 
-# --- MAIN FUNCTION (Tidak berubah) ---
+# === PERUBAHAN 3: Modifikasi main() ===
 def main():
     """Start the bot and the scheduler."""
     try:
         logger.info("=== Inisialisasi Bot Worker ===")
         validate_config()
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        
+        # (Handler tidak berubah)
         application.add_handler(CommandHandler("start", start_handler))
         application.add_handler(CommandHandler("info", info_handler))
         application.add_handler(CommandHandler("stats", stats_handler))
@@ -301,22 +333,37 @@ def main():
         application.add_handler(CallbackQueryHandler(handle_dottrick_backtolist, pattern="^dottrick_backtolist$"))
         application.add_handler(CallbackQueryHandler(callback_handler))
         application.add_error_handler(error_handler)
+        
+        # --- PERUBAHAN KUNCI ---
+        # Tetapkan post_init ke fungsi yg akan start scheduler
         application.post_init = setup_bot_commands
-        logger.info("Initializing background scheduler...")
-        scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
-        scheduler.add_job( scheduled_proxy_sync_task, trigger=IntervalTrigger(weeks=1), id="weekly_proxy_sync", name="Weekly Proxy Sync", next_run_time=datetime.now() )
-        scheduler.start()
-        logger.info("✅ Background scheduler started.")
+        # ---------------------
+
+        # --- HAPUS BLOK INI DARI main() ---
+        # logger.info("Initializing background scheduler...")
+        # scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
+        # scheduler.add_job( scheduled_proxy_sync_task, trigger=IntervalTrigger(weeks=1), id="weekly_proxy_sync", name="Weekly Proxy Sync", next_run_time=datetime.now() )
+        # scheduler.start() # <-- INI YANG MENYEBABKAN ERROR
+        # logger.info("✅ Background scheduler started.")
+        # ---------------------------------
+        
         logger.info("🚀 Bot worker siap. Memulai polling...")
         application.run_polling()
+        
+        # Shutdown scheduler (referensi ke scheduler global)
         logger.info("Shutting down scheduler...")
-        scheduler.shutdown()
+        if scheduler.running:
+            scheduler.shutdown()
+            
     except (KeyboardInterrupt, SystemExit):
          logger.info("Bot stopped manually. Shutting down scheduler...")
-         if 'scheduler' in locals() and scheduler.running: scheduler.shutdown()
+         if scheduler.running: # Referensi ke scheduler global
+             scheduler.shutdown()
+             
     except Exception as e:
         logger.critical(f"FATAL ERROR (Worker): {e}", exc_info=True)
-        if 'scheduler' in locals() and scheduler.running: scheduler.shutdown()
+        if scheduler.running: # Referensi ke scheduler global
+             scheduler.shutdown()
         sys.exit(1)
 
 if __name__ == "__main__":
