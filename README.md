@@ -1,46 +1,173 @@
-# GitHub Persona Generator Bot
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
+[![Status](https://img.shields.io/badge/status-active-success.svg)]()
 
-[![Python Version](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+AI-Powered GitHub Profile & Asset Generator controlled via Telegram Bot.
 
-## Overview
+## Deskripsi
 
-This project contains a Telegram bot that generates realistic GitHub developer personas and associated assets (like profile data, activity suggestions, code snippets, and README files) using multiple AI models via LiteLLM Router. It features a Textual TUI for managing the bot process on a server.
+Project ini bertujuan untuk men-generate data profil developer GitHub yang realistis beserta aset-aset pendukungnya (seperti file README profil/proyek, *code snippets*, *config files*) menggunakan berbagai model AI (*Large Language Models*). Interaksi utama dilakukan melalui bot Telegram, memudahkan *request* pembuatan aset kapan saja.
 
-## Features
+Fitur utama termasuk *fallback* manual antar berbagai *provider* AI (Gemini, Groq, Cohere, OpenRouter, dll.) untuk memastikan *uptime* dan *chaining prompt* untuk menghasilkan data profil dan aset yang koheren.
 
-* **Multi-Persona Generation:** Supports various developer archetypes (40+ personas defined).
-* **AI Chaining:** Uses a 2-step process (Profile -> Assets) for coherence.
-* **Multi-Provider AI:** Leverages `litellm.Router` to select the fastest AI provider (Gemini, Cohere, Mistral, OpenRouter, Fireworks, Hugging Face, Replicate) based on latency.
-* **Duplicate Prevention:** Tracks generated names/usernames to avoid repetition.
-* **Proxy Support:** Rotates through a list of proxies from `proxy.txt` for AI and Telegram API calls.
-* **Telegram Bot Interface:** Interact with the generator via Telegram commands and inline buttons.
-* **Gmail Dot Trick:** Includes a utility to generate random Gmail dot trick variations.
-* **TUI Controller:** Uses `textual` for a terminal-based UI to start, stop, and refresh the bot worker process, including a live log view.
-* **Structured Code:** Refactored into `src/` directory with modules, services, and prompts separated.
+## Fitur Utama
 
-## Setup & Usage
+* **Generasi Persona AI:** Membuat data profil developer (nama, username unik, bio profesional dalam Bahasa Inggris, info opsional seperti perusahaan, lokasi, *website*, *social links*, *tech stack*).
+* **Generasi Aset Terkait:** Secara opsional membuat aset seperti:
+    * README.md untuk profil pengguna.
+    * README.md untuk proyek baru.
+    * *Code snippets* atau *script* dasar (Python, JS, Shell, dll.).
+    * File konfigurasi (Docker, Nginx, dll.).
+    * Dotfiles.
+* **Dukungan Multi-Provider AI:** Menggunakan LiteLLM untuk mengakses berbagai API LLM (Gemini, Groq, Cohere, OpenRouter, Replicate, HuggingFace, Mistral).
+* **Fallback Manual:** Jika satu model/API key gagal, sistem akan otomatis mencoba kombinasi model/key lain secara acak hingga berhasil.
+* **Interface Bot Telegram:** Kontrol mudah via Telegram:
+    * `/start`: Menampilkan menu utama.
+    * **🎲 Random:** Generate persona acak.
+    * **📋 List Persona:** Pilih tipe persona spesifik dari daftar.
+    * **📧 Dot Trick:** Generate variasi alamat Gmail acak (membutuhkan `data/gmail.txt`).
+    * **📊 Stats:** Melihat status konfigurasi AI dan statistik Dot Trick.
+    * **ℹ️ Info:** Informasi dasar tentang bot.
+* **Gmail Dot Trick Generator:** Membuat variasi alamat Gmail unik dengan menambahkan titik (`.`) secara acak.
+* **History Tracking:** Menyimpan *history* persona dan variasi dot trick yang sudah di-generate (di folder `history/`) untuk menghindari duplikasi.
+* **Konfigurasi Fleksibel:** Pengaturan API Key, Token Bot, dan ID Chat melalui file `.env`.
+* **(Opsional) TUI Controller:** Interface `textual` untuk menjalankan dan memonitor bot secara lokal (kurang cocok untuk *deployment* VPS).
 
-1.  **Clone:** `git clone <your-repo-url>`
-2.  **Navigate:** `cd <your-repo-name>`
-3.  **Create `.env`:** Copy `.env.example` (if provided) or create `.env` and fill in your API keys (Gemini, Cohere, etc.) and Telegram Bot Token/Chat ID.
-4.  **Create `data/proxy.txt`:** Add your proxies (format: `http://user:pass@host:port`), one per line.
-5.  **Create `data/gmail.txt`:** Add target Gmail addresses for dot trick, one per line.
-6.  **Setup Virtual Environment:**
+## Arsitektur & Teknologi
+
+* **Bahasa:** Python 3.10+
+* **AI Abstraction:** LiteLLM
+* **Telegram Bot Framework:** `python-telegram-bot`
+* **Konfigurasi:** `python-dotenv`
+* **HTTP Requests:** `requests`
+* **(Opsional) TUI:** `textual`
+* **Deployment (Rekomendasi):** `systemd` di Linux (misal Ubuntu di AWS).
+
+## Instalasi
+
+1.  **Clone Repository:**
+    ```bash
+    git clone [https://github.com/Kyugito666/Github-Asset-Factory.git](https://github.com/Kyugito666/Github-Asset-Factory.git)
+    cd Github-Asset-Factory
+    ```
+
+2.  **Buat & Aktifkan Virtual Environment:**
     ```bash
     python3 -m venv venv
-    source venv/bin/activate # or venv\Scripts\activate on Windows
+    source venv/bin/activate 
+    # (Di Windows pakai: venv\Scripts\activate)
     ```
-7.  **Install Dependencies:** `pip install -r requirements.txt`
-8.  **Run TUI Controller:** `python tui.py`
-9.  Inside the TUI, press `1` to start the bot worker.
-10. Interact with your bot on Telegram.
 
-## File Structure
+3.  **Install Dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-autoprofile/ ├── .env # API Keys & Secrets (Not committed) ├── .gitignore # Files ignored by Git ├── README.md # This file ├── data/ │ ├── gmail.txt # Input Gmail list (Not committed) │ └── proxy.txt # Input Proxy list (Not committed) ├── history/ # Generated history (Not committed) │ ├── dot_trick_history.json │ └── persona_history.json ├── logs/ # Log files (Not committed) │ └── app.log ├── requirements.txt # Python dependencies ├── src/ # Source code │ ├── init.py │ ├── bot.py # Telegram bot worker logic │ ├── config.py # Config loading, logging, proxy pool │ ├── modules/ # Specific features │ │ ├── init.py │ │ ├── gmail_trick.py │ │ └── persona_history.py │ ├── prompts/ # AI Prompts │ │ ├── init.py │ │ └── prompts.py │ └── services/ # External service interactions │ ├── init.py │ ├── llm_service.py # AI Router logic │ └── telegram_service.py # Telegram API logic └── tui.py # Main TUI controller entry point
+## Konfigurasi
 
+1.  **Buat File `.env`:**
+    Di *root* folder proyek (`Github-Asset-Factory`), buat file bernama `.env`. Isi dengan API key dan token Anda. Contoh format:
+    ```dotenv
+    # --- AI Keys (Wajib ada minimal 1 provider) ---
+    GEMINI_API_KEY="AIza...,AIza..." # Bisa multiple, pisahkan koma
+    GROQ_API_KEY="gsk_..."
+    COHERE_API_KEY="..."
+    REPLICATE_API_KEY="r8_..."
+    HF_API_TOKEN="hf_..."
+    OPENROUTER_API_KEY="sk-or-v1-..."
+    MISTRAL_API_KEY="..."
+    # FIREWORKS_API_KEY="..." # (Jika ingin ditambahkan kembali)
 
-## License
+    # --- Telegram (Wajib) ---
+    TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN"
+    TELEGRAM_CHAT_ID="YOUR_CHAT_ID" # ID User/Grup target pengiriman
+    ```
+    **PENTING:** Jangan pernah *commit* file `.env` ke Git! Pastikan ada di `.gitignore`.
 
-This project is licensed under the MIT License - see the LICENSE file for details (You might want to add a LICENSE file).
+2.  **Siapkan Folder `data/`:**
+    * Buat folder `data` di *root* proyek: `mkdir data`
+    * (Opsional) Buat file `data/gmail.txt`. Isi dengan daftar alamat Gmail (satu per baris) yang ingin dibuat variasinya.
+    * (Opsional) Buat file `data/proxy.txt`. Isi dengan daftar proxy HTTP/HTTPS (satu per baris, format `http://user:pass@host:port` atau `http://host:port`) jika ingin menggunakan proxy untuk request ke API AI dan Telegram.
+
+3.  **Folder `history/`:** Folder ini akan dibuat otomatis saat pertama kali ada data persona atau dot trick di-generate.
+
+## Penggunaan
+
+### 1. Lokal (Menggunakan TUI)
+
+Cara ini cocok untuk *development* atau *debugging*.
+
+```bash
+# Pastikan venv aktif
+source venv/bin/activate
+
+# Jalankan TUI Controller
+python tui.py 
+````
+
+Gunakan tombol di TUI untuk Start/Stop/Refresh server bot atau melakukan Git Pull. Log dari bot akan muncul di panel log TUI.
+
+### 2\. VPS / Background Service (Menggunakan `systemd`) - Rekomendasi
+
+Cara ini membuat bot berjalan 24/7 di *background*, otomatis start saat boot, dan otomatis restart jika *crash*.
+
+1.  **Buat File Service Unit:**
+
+    ```bash
+    sudo nano /etc/systemd/system/github-asset-bot.service
+    ```
+
+2.  **Isi File Service:**
+    Ganti `/path/to/your/Github-Asset-Factory` dengan *path* absolut folder proyek Anda.
+
+    ```ini
+    [Unit]
+    Description=GitHub Asset Factory Bot Worker (Direct)
+    After=network.target
+
+    [Service]
+    User=ubuntu # Ganti jika username VPS Anda berbeda
+    Group=ubuntu # Ganti jika group VPS Anda berbeda
+    WorkingDirectory=/path/to/your/Github-Asset-Factory 
+    # Pastikan path ke python di venv benar
+    ExecStart=/path/to/your/Github-Asset-Factory/venv/bin/python -m src.bot 
+    Restart=on-failure
+    Environment="PYTHONUNBUFFERED=1"
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+3.  **Simpan & Keluar** (`Ctrl+X`, `Y`, `Enter`).
+
+4.  **Reload, Enable, Start:**
+
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable github-asset-bot.service
+    sudo systemctl start github-asset-bot.service
+    ```
+
+5.  **Cek Status & Log:**
+
+    ```bash
+    sudo systemctl status github-asset-bot.service 
+    sudo journalctl -u github-asset-bot.service -f # Lihat log real-time (Ctrl+C untuk keluar)
+    ```
+
+    Bot akan berjalan di *background*. Interaksi hanya melalui Telegram.
+
+### 3\. Interaksi via Telegram Bot
+
+Setelah bot berjalan (baik via TUI atau `systemd`), buka chat dengan bot Anda di Telegram dan gunakan perintah atau tombol yang tersedia:
+
+  * `/start`: Menampilkan menu keyboard.
+  * **Tombol Keyboard:** Gunakan tombol `🎲 Random`, `📋 List Persona`, `📧 Dot Trick`, `📊 Stats`, `ℹ️ Info`.
+
+## Lisensi
+
+(Tambahkan info lisensi jika ada, misal: MIT License)
+
+-----
+
+```
+```
