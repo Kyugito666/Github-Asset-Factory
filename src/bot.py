@@ -229,7 +229,12 @@ async def handle_dottrick_backtolist(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query; await query.answer()
     try: await query.edit_message_text("🔄 Reloading list...", reply_markup=None)
     except Exception: pass
-    await dot_trick_handler(query, context) # Kirim query object
+    # Perlu message object untuk dot_trick_handler
+    # Coba ambil dari query.message
+    if query.message:
+        await dot_trick_handler(query.message, context) # Kirim message object
+    else:
+        logger.error("Cannot go back to dot trick list: query.message is None")
 
 
 async def run_dot_trick_task(email: str, chat_id: str):
