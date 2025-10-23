@@ -8,7 +8,7 @@ from typing import Optional, Dict, List, Tuple
 
 # Import exception yang relevan
 from litellm import Timeout, APIConnectionError, AuthenticationError, BadRequestError, RateLimitError, NotFoundError
-from litellm.types.router import RouterRateLimitError # Jika masih pakai router, tapi kita tidak
+# from litellm.types.router import RouterRateLimitError # Tidak dipakai lagi
 
 # --- Load Prompts (Tidak berubah) ---
 logger = logging.getLogger(__name__)
@@ -43,23 +43,46 @@ from ..modules.persona import load_used_data, add_to_history, load_history_data
 # litellm.set_verbose = True # Aktifkan jika perlu detail error litellm
 
 # ============================================================
-# MANUAL FALLBACK SETUP (Tidak berubah)
+# MANUAL FALLBACK SETUP
 # ============================================================
 
 llm_call_options: List[Dict] = []
 
+# === PERBAIKAN DI FUNGSI INI ===
+# --- Helper Function for Proxy (DIPERBAIKI) ---
 def get_proxy_for_provider(provider_prefix: str) -> Optional[str]:
-    if not PROXY_POOL: return None
-    proxy_url = PROXY_POOL.get_next_proxy()
-    if not proxy_url: return None
-    if provider_prefix in ["gemini", "cohere", "groq", "huggingface", "mistral"]:
-        return f"{provider_prefix}:{proxy_url}"
-    else:
-        return proxy_url
+    """Return proxy string based on provider, skip if incompatible."""
+    if not PROXY_POOL:
+        # logger.debug("Proxy pool not available.")
+        return None
 
+    # Providers known to cause "proxy unsupported" errors with LiteLLM's param
+    incompatible_providers = ["groq", "huggingface"]
+    if provider_prefix in incompatible_providers:
+        logger.warning(f"Skipping proxy for incompatible provider: {provider_prefix}")
+        return None
+
+    proxy_url = PROXY_POOL.get_next_proxy()
+    if not proxy_url:
+        # logger.debug("No available proxy from pool.")
+        return None
+
+    # Apply provider-specific formatting if needed (example)
+    # if provider_prefix in ["gemini", "cohere", "mistral"]:
+    #     return f"{provider_prefix}:{proxy_url}"
+    # else: # openrouter, replicate, etc. might just need the URL
+    #     return proxy_url
+    
+    # Coba pakai format URL langsung untuk semua yang lolos filter
+    # LiteLLM mungkin bisa handle ini
+    return proxy_url
+# === AKHIR PERBAIKAN ===
+
+
+# --- Helper Function to add call options (Tidak berubah) ---
 def add_call_options(keys: list, provider: str, model_configs: List[Dict]):
     if not keys: return
-    provider_lower = provider.lower()
+    provider_lower = provider.lower() # Gunakan nama provider lowercase untuk cek proxy
     for key in keys:
         for model_config in model_configs:
             model_id = model_config["litellm_id"]
@@ -67,7 +90,7 @@ def add_call_options(keys: list, provider: str, model_configs: List[Dict]):
                 "model": model_id,
                 "api_key": key,
                 "max_tokens": model_config.get("max_tokens"),
-                "proxy": get_proxy_for_provider(provider_lower)
+                "proxy": get_proxy_for_provider(provider_lower) # Pakai provider_lower
             }
             if "custom_llm_provider" in model_config:
                 call_params["custom_llm_provider"] = model_config["custom_llm_provider"]
@@ -75,10 +98,11 @@ def add_call_options(keys: list, provider: str, model_configs: List[Dict]):
             call_params = {k: v for k, v in call_params.items() if v is not None}
 
             llm_call_options.append({
-                "provider": provider,
+                "provider": provider, # Tetap simpan nama display asli
                 "params": call_params
             })
 
+# --- Load Model Definitions from JSON (Tidak berubah) ---
 API_KEY_MAP = {
     "gemini": (GEMINI_API_KEYS, "Gemini"),
     "cohere": (COHERE_API_KEYS, "Cohere"),
@@ -119,36 +143,28 @@ except Exception as e:
     logger.critical(f"FATAL: Error loading models or keys: {e}")
 
 # ============================================================
-# UTILITY FUNCTIONS (DIPERBAIKI)
+# UTILITY FUNCTIONS (Tidak berubah)
 # ============================================================
-
-# === PERBAIKAN DI FUNGSI INI ===
 def clean_ai_response(raw_text: str) -> str:
     """Cleans AI response: removes markdown code fences and extracts JSON block."""
     text = raw_text.strip()
-    cleaned_text = text # Mulai dengan teks asli
+    cleaned_text = text
 
-    # Step 1: Remove markdown fences if they exist
     if text.startswith("```") and text.endswith("```"):
         lines = text.split('\n')
         if len(lines) > 1:
-            # Hapus baris pertama (e.g., ```json) dan baris terakhir (```)
             cleaned_text = '\n'.join(lines[1:-1]).strip()
         else:
-            # Handle kasus satu baris seperti ```json { ... } ```
             try:
-                # Cari spasi pertama setelah ``` dan ``` terakhir
                 first_space_index = text.index(' ')
                 last_backticks_index = text.rindex('```')
-                # Ekstrak konten di antaranya
                 if first_space_index < last_backticks_index:
                     cleaned_text = text[first_space_index + 1:last_backticks_index].strip()
-                else: # Jika format aneh, coba hapus ``` awal & akhir saja
+                else:
                     cleaned_text = text[3:-3].strip()
-            except ValueError: # Jika ' ' atau '```' tidak ditemukan
-                 cleaned_text = text[3:-3].strip() # Fallback hapus ``` awal & akhir
-    
-    # Step 2: Find the outermost JSON object/array dari cleaned_text
+            except ValueError:
+                 cleaned_text = text[3:-3].strip()
+
     first_brace = cleaned_text.find('{')
     first_bracket = cleaned_text.find('[')
     last_brace = cleaned_text.rfind('}')
@@ -157,25 +173,18 @@ def clean_ai_response(raw_text: str) -> str:
     start = -1
     end = -1
 
-    # Cek apakah object {...} valid terdeteksi
     if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
         start = first_brace
         end = last_brace
-    # Jika tidak ada object, cek apakah array [...] valid terdeteksi
     elif first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
          start = first_bracket
          end = last_bracket
 
-    # Jika start dan end valid ditemukan, ekstrak bagian itu
     if start != -1 and end != -1:
         return cleaned_text[start:end+1]
     else:
-        # Jika tidak ada struktur JSON yang jelas, kembalikan teks yang sudah dibersihkan
-        # Ini mungkin masih gagal parsing JSON nanti, tapi fungsi ini sudah berusaha
         logger.warning("Could not clearly identify JSON structure in cleaned AI response.")
         return cleaned_text
-# === AKHIR PERBAIKAN ===
-
 
 def ai_decide_send_method(persona_type: str, has_files: bool) -> str: return 'text' if has_files else 'none'
 
@@ -191,6 +200,10 @@ def call_llm(prompt: str) -> Optional[str]:
         provider = option["provider"]
         params = option["params"].copy()
         model_id = params.get("model", "N/A")
+
+        # Hapus proxy param jika None (karena get_proxy_for_provider bisa return None)
+        if "proxy" in params and params["proxy"] is None:
+            del params["proxy"]
 
         logger.info(f"Attempt {i+1}/{len(llm_call_options)}: Trying {provider} - {model_id}")
 
@@ -221,7 +234,7 @@ def call_llm(prompt: str) -> Optional[str]:
     return None
 
 # ============================================================
-# MAIN GENERATION (DIPERBAIKI sedikit di error handling JSON)
+# MAIN GENERATION (Tidak berubah)
 # ============================================================
 def generate_persona_data(persona_type: str) -> Optional[Dict]:
     logger.info(f"🔄 AI Chaining: '{persona_type}'")
@@ -235,11 +248,10 @@ def generate_persona_data(persona_type: str) -> Optional[Dict]:
     while duplicate_retry_count <= MAX_DUPLICATE_RETRIES:
         if duplicate_retry_count > 0:
              logger.info(f"Retrying Step 1 generation due to duplicate (Attempt {duplicate_retry_count})")
-             # Buat prompt baru dengan instruksi anti-duplikat
              recent_history = load_history_data()[-10:]
              forbidden_names = {h.get('name') for h in recent_history if h.get('name')}
              forbidden_usernames = {h.get('username') for h in recent_history if h.get('username')}
-             retry_instruction = f"\n\nCRITICAL: DO NOT use the name '{name}' or the username '{username}' again. Also AVOID these recent names/usernames:\n" # name & username dari iterasi sebelumnya
+             retry_instruction = f"\n\nCRITICAL: DO NOT use the name '{name}' or the username '{username}' again. Also AVOID these recent names/usernames:\n"
              if forbidden_names: retry_instruction += f"- Forbidden Names: {', '.join(forbidden_names)}\n"
              if forbidden_usernames: retry_instruction += f"- Forbidden Usernames: {', '.join(forbidden_usernames)}\n"
              retry_instruction += "Generate a COMPLETELY NEW and UNIQUE name and username."
@@ -250,14 +262,13 @@ def generate_persona_data(persona_type: str) -> Optional[Dict]:
         raw_1 = call_llm(current_prompt)
         if not raw_1:
             logger.error(f"❌ Step 1 failed (Manual fallback exhausted on attempt {duplicate_retry_count})")
-            return None # Gagal total jika LLM call gagal
+            return None
 
         try:
-            # Coba parse JSON SETELAH memanggil clean_ai_response
             cleaned_response = clean_ai_response(raw_1)
-            if not cleaned_response: # Jika cleaning menghasilkan string kosong
+            if not cleaned_response:
                  logger.error(f"❌ Step 1 clean_ai_response resulted in empty string. Raw: {raw_1[:100]}...")
-                 duplicate_retry_count +=1 # Anggap ini sbg kegagalan & coba lagi
+                 duplicate_retry_count +=1
                  continue
 
             data = json.loads(cleaned_response)
@@ -267,9 +278,8 @@ def generate_persona_data(persona_type: str) -> Optional[Dict]:
             if not username or not name:
                 logger.warning(f"AI returned no username/name. Retrying... ({duplicate_retry_count+1}/{MAX_DUPLICATE_RETRIES})")
                 duplicate_retry_count += 1
-                continue # Coba generate lagi
+                continue
 
-            # Cek duplikat
             duplicate_reason = None
             if username in used_usernames: duplicate_reason = f"username '{username}'"
             elif name in used_names: duplicate_reason = f"name '{name}'"
@@ -280,25 +290,21 @@ def generate_persona_data(persona_type: str) -> Optional[Dict]:
                 if duplicate_retry_count > MAX_DUPLICATE_RETRIES:
                     logger.error(f"❌ Step 1 FAILED after {MAX_DUPLICATE_RETRIES} retries (duplicates persisted).")
                     return None
-                # Loop akan lanjut ke iterasi berikutnya
             else:
-                base_data = data # Sukses, tidak duplikat
-                break # Keluar dari while loop
+                base_data = data
+                break
 
         except json.JSONDecodeError as e:
             logger.error(f"❌ Step 1 JSON parse error: {e}. Cleaned: {cleaned_response[:100]}... Raw: {raw_1[:100]}...")
-            # Mungkin coba lagi? Atau gagal? Untuk sekarang, anggap gagal.
             return None
-        except Exception as e: # Tangkap error lain saat parsing/checking
+        except Exception as e:
              logger.error(f"❌ Unexpected error in Step 1 processing: {e}. Raw: {raw_1[:100]}...")
              return None
 
-    # Jika loop selesai tanpa break (artinya base_data masih None setelah retry)
     if not base_data:
-         logger.error("❌ Step 1 failed after retries.") # Seharusnya sudah ditangani di dalam loop
+         logger.error("❌ Step 1 failed after retries.")
          return None
 
-    # ---- Lanjut ke Step 2 jika Step 1 sukses ----
     add_to_history(base_data.get('username'), base_data.get('name'))
     logger.info(f"✅ Seed (Unique): {base_data.get('name')} (@{base_data.get('username')})")
 
@@ -313,7 +319,7 @@ def generate_persona_data(persona_type: str) -> Optional[Dict]:
     raw_2 = call_llm(asset_prompt)
     if not raw_2:
         logger.error("❌ Step 2 failed (Manual fallback exhausted)")
-        return None # Gagal total jika Step 2 gagal
+        return None
 
     try:
         cleaned_response_2 = clean_ai_response(raw_2)
