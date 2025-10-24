@@ -16,10 +16,8 @@ def format_profile_message(persona_type: str, data: dict) -> str:
     message = f"✅ *Aset Persona Dibuat: {persona_title}*\n\n"
     message += "*--- PROFIL DATA ---*\n"
 
-    # === PERUBAHAN DI SINI ===
     # Define fields in the desired GitHub order (Username dulu baru Name)
     profile_order = ["username", "name", "bio", "pronouns", "website", "social_links", "company", "location"]
-    # === AKHIR PERUBAHAN ===
 
     for key in profile_order:
         value = data.get(key)
@@ -73,7 +71,7 @@ def format_profile_message(persona_type: str, data: dict) -> str:
              message += f"📝 `{repo_description}`\n"
 
     return message
-# === AKHIR PERBAIKAN ===
+# === AKHIR FUNGSI format_profile_message ===
 
 
 def format_code_message(file_name: str, file_content: str, max_length: int = 3500) -> str:
@@ -81,7 +79,12 @@ def format_code_message(file_name: str, file_content: str, max_length: int = 350
     ext = os.path.splitext(file_name)[1]; lang = ext_to_lang.get(ext, 'text')
     content = file_content
     if len(content) > max_length: content = content[:max_length] + "\n\n... (truncated)"
-    message = f"📄 *File: {file_name}*\n\n```{lang}\n{content}\n```"
+    
+    # === PERUBAHAN DI SINI ===
+    # Bungkus file_name dengan backtick (`) agar bisa di-copy
+    message = f"📄 *File:* `{file_name}`\n\n```{lang}\n{content}\n```"
+    # === AKHIR PERUBAHAN ===
+    
     return message
 
 
@@ -196,6 +199,3 @@ def send_persona_to_telegram(persona_type: str, data: dict, chat_id: str = None)
     else:
         logger.warning(f"[!] Profile sent, but only {success_count}/{total_files} file(s) were sent successfully.")
         return False # Anggap gagal jika tidak semua file terkirim
-
-# KESALAHAN ADA DI SINI SEBELUMNYA (ADA '}' TAMBAHAN)
-# VERSI INI SUDAH DIHAPUS
