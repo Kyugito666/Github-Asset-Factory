@@ -179,32 +179,25 @@ def run_webshare_ip_sync() -> bool:
 # src/modules/proxy.py - GANTI FUNGSI get_webshare_download_url
 
 def get_webshare_download_url(session: requests.Session, plan_id: str):
-    """Mengambil URL download proxy dari /config/."""
     logger.info("Webshare Download:    -> Getting download URL via /config/ ...")
-    params = {"plan_id": plan_id}
     try:
-        response = session.get(WEBSHARE_CONFIG_URL, params=params, timeout=WEBSHARE_API_TIMEOUT)
+        response = session.get(WEBSHARE_CONFIG_URL, timeout=WEBSHARE_API_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-        username = data.get("username")
         token = data.get("proxy_list_download_token")
         
-        if not username or not token:
-            logger.error("   -> ERROR: 'username' or 'token' missing.")
+        if not token:
+            logger.error("   -> ERROR: token missing.")
             return None
         
-        # FIX: Username dari API, bukan literal 'username'
-        dl_url = f"https://proxy.webshare.io/api/v2/proxy/list/download/{token}/-/any/{username}/direct/-/?plan_id={plan_id}"
+        # SIMPLE URL TANPA PLAN_ID DI QUERY
+        dl_url = f"https://proxy.webshare.io/api/v2/proxy/list/download/{token}/-/any/username/direct/-/"
         logger.info(f"       -> OK URL generated.")
         return dl_url
         
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"   -> ERROR HTTP getting DL config: {e.response.status_code} - {e.response.text[:100]}")
+    except Exception as e:
+        logger.error(f"   -> ERROR: {e}")
         return None
-    except requests.RequestException as e:
-        logger.error(f"   -> ERROR Connection getting DL config: {e}")
-        return None
-
 # --- FUNGSI LOGIKA PROXY SYNC LAINNYA ---
 
 def load_apis(file_path):
