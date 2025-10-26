@@ -101,7 +101,15 @@ def get_main_keyboard():
     keyboard = [
         [KeyboardButton("🎲 Random"), KeyboardButton("📋 List Persona")],
         [KeyboardButton("📧 Dot Trick"), KeyboardButton("ℹ️ Info")],
-        [KeyboardButton("📊 Stats")]
+        [KeyboardButton("📊 Stats"), KeyboardButton("🔧 Proxy Menu")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+
+def get_proxy_menu_keyboard():
+    keyboard = [
+        [KeyboardButton("🌐 IP Auth"), KeyboardButton("⬇️ Download Proxy")],
+        [KeyboardButton("🔄 Convert Format"), KeyboardButton("✅ Test Proxy")],
+        [KeyboardButton("🚀 Full Auto Sync"), KeyboardButton("🔙 Back to Main")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -155,6 +163,145 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• Total Variations Generated: `{stats_gmail['total_variations_generated']}`")
 
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+
+async def show_proxy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = (
+        "🔧 **Proxy Management Menu**\n\n"
+        "Pilih operasi yang ingin dijalankan:\n\n"
+        "🌐 **IP Auth** - Sync IP ke Webshare\n"
+        "⬇️ **Download** - Download dari API\n"
+        "🔄 **Convert** - Format proxy list\n"
+        "✅ **Test** - Test proxy validity\n"
+        "🚀 **Full Auto** - Semua step otomatis"
+    )
+    await update.message.reply_text(message, reply_markup=get_proxy_menu_keyboard(), parse_mode=ParseMode.MARKDOWN)
+
+async def trigger_ip_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    if not ENABLE_WEBSHARE_IP_SYNC:
+        await update.message.reply_text("⛔ Fitur IP Auth tidak aktif di konfigurasi.")
+        return
+    await update.message.reply_text("🌐 **Memulai IP Authorization Sync...**", parse_mode=ParseMode.MARKDOWN)
+    context.application.create_task(run_ip_auth_task(chat_id))
+
+async def run_ip_auth_task(chat_id: str):
+    start_time = time.time()
+    try:
+        success = await asyncio.to_thread(run_webshare_ip_sync)
+        duration = time.time() - start_time
+        if success:
+            await asyncio.to_thread(send_text_message, f"✅ IP Auth selesai ({duration:.1f}s)", chat_id)
+        else:
+            await asyncio.to_thread(send_text_message, f"⚠️ IP Auth ada error ({duration:.1f}s). Cek log.", chat_id)
+    except Exception as e:
+        duration = time.time() - start_time
+        await asyncio.to_thread(send_text_message, f"❌ Error IP Auth ({duration:.1f}s): {str(e)[:100]}", chat_id)
+
+async def trigger_download_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    await update.message.reply_text("⬇️ **Memulai Download Proxy...**", parse_mode=ParseMode.MARKDOWN)
+    context.application.create_task(run_download_proxy_task(chat_id))
+
+async def run_download_proxy_task(chat_id: str):
+    start_time = time.time()
+    try:
+        from .modules.proxy import download_proxies_from_apis
+        proxies = await asyncio.to_thread(download_proxies_from_apis)
+        duration = time.time() - start_time
+        if proxies:
+            await asyncio.to_thread(send_text_message, f"✅ Download selesai ({duration:.1f}s)\n📦 {len(proxies)} proxy", chat_id)
+        else:
+            await asyncio.to_thread(send_text_message, f"⚠️ Download gagal/kosong ({duration:.1f}s)", chat_id)
+    except Exception as e:
+        duration = time.time() - start_time
+        await asyncio.to_thread(send_text_message, f"❌ Error Download ({duration:.1f}s): {str(e)[:100]}", chat_id)
+
+async def trigger_convert_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    await update.message.reply_text("🔄 **Memulai Convert Format...**", parse_mode=ParseMode.MARKDOWN)
+    context.application.create_task(run_convert_proxy_task(chat_id))
+
+async def run_convert_proxy_task(chat_id: str):
+    start_time = time.time()
+    try:
+        from .modules.proxy import convert_proxylist_to_http, PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE
+        import os
+        if not os.path.exists(PROXYLIST_SOURCE_FILE):
+            await asyncio.to_thread(send_text_message, "⚠️ File proxylist.txt tidak ada", chat_id)
+            return
+        success = await asyncio.to_thread(convert_proxylist_to_http, PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE)
+        duration = time.time() - start_time
+        if success:
+            await asyncio.to_thread(send_text_message, f"✅ Convert selesai ({duration:.1f}s)", chat_id)
+        else:
+            await asyncio.to_thread(send_text_message, f"❌ Convert gagal ({duration:.1f}s)", chat_id)
+    except Exception as e:
+        duration = time.time() - start_time
+        await asyncio.to_thread(send_text_message, f"❌ Error Convert ({duration:.1f}s): {str(e)[:100]}", chat_id)
+
+async def trigger_test_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    await update.message.reply_text("✅ **Memulai Test Proxy...**", parse_mode=ParseMode.MARKDOWN)
+    context.application.create_task(run_test_proxy_task(chat_id))
+
+async def run_test_proxy_task(chat_id: str):
+    start_time = time.time()
+    try:
+        from .modules.proxy import run_proxy_test, load_and_deduplicate_proxies, PROXY_SOURCE_FILE
+        proxies = await asyncio.to_thread(load_and_deduplicate_proxies, PROXY_SOURCE_FILE)
+        if not proxies:
+            await asyncio.to_thread(send_text_message, "⚠️ Tidak ada proxy untuk di-test", chat_id)
+            return
+        await asyncio.to_thread(send_text_message, f"🔍 Testing {len(proxies)} proxy...", chat_id)
+        good = await asyncio.to_thread(run_proxy_test, proxies)
+        duration = time.time() - start_time
+        success_rate = (len(good) / len(proxies) * 100) if proxies else 0
+        message = (
+            f"✅ **Test Selesai** ({duration:.1f}s)\n\n"
+            f"📊 Total: `{len(proxies)}`\n"
+            f"✔️ Valid: `{len(good)}` ({success_rate:.1f}%)\n"
+            f"❌ Gagal: `{len(proxies) - len(good)}`"
+        )
+        await asyncio.to_thread(send_text_message, message, chat_id)
+    except Exception as e:
+        duration = time.time() - start_time
+        await asyncio.to_thread(send_text_message, f"❌ Error Test ({duration:.1f}s): {str(e)[:100]}", chat_id)
+
+async def trigger_full_auto_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.message.chat_id)
+    await update.message.reply_text(
+        "🚀 **Memulai Full Auto Sync...**\n\n"
+        "Proses:\n"
+        "1️⃣ IP Authorization\n"
+        "2️⃣ Download Proxy\n"
+        "3️⃣ Convert Format\n"
+        "4️⃣ Test Proxy\n"
+        "5️⃣ Save & Reload Pool\n\n"
+        "_Harap tunggu 1-3 menit..._",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    context.application.create_task(run_full_auto_sync_task(chat_id))
+
+async def run_full_auto_sync_task(chat_id: str):
+    start_time = time.time()
+    try:
+        success = await full_webshare_auto_sync()
+        duration = time.time() - start_time
+        if success:
+            from .config import PROXY_POOL
+            proxy_count = len(PROXY_POOL.proxies) if PROXY_POOL and PROXY_POOL.proxies else 0
+            message = (
+                f"✅ **Full Auto Sync Berhasil!**\n\n"
+                f"⏱ Durasi: `{duration:.1f}s`\n"
+                f"📊 Working Proxies: `{proxy_count}`\n"
+                f"🔄 Pool Status: `Active`"
+            )
+            await asyncio.to_thread(send_text_message, message, chat_id)
+        else:
+            await asyncio.to_thread(send_text_message, f"⚠️ Full Auto Sync gagal ({duration:.1f}s). Cek log.", chat_id)
+    except Exception as e:
+        duration = time.time() - start_time
+        await asyncio.to_thread(send_text_message, f"❌ Error Full Sync ({duration:.1f}s): {str(e)[:100]}", chat_id)
 
 async def trigger_generation(query_or_message, persona_type: str, context: ContextTypes.DEFAULT_TYPE):
     target_chat_id = None
@@ -371,6 +518,20 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await info_handler(update, context)
     elif text == "📊 Stats":
         await stats_handler(update, context)
+    elif text == "🔧 Proxy Menu":
+        await show_proxy_menu(update, context)
+    elif text == "🔙 Back to Main":
+        await update.message.reply_text("🔙 Kembali ke menu utama", reply_markup=get_main_keyboard())
+    elif text == "🌐 IP Auth":
+        await trigger_ip_auth(update, context)
+    elif text == "⬇️ Download Proxy":
+        await trigger_download_proxy(update, context)
+    elif text == "🔄 Convert Format":
+        await trigger_convert_proxy(update, context)
+    elif text == "✅ Test Proxy":
+        await trigger_test_proxy(update, context)
+    elif text == "🚀 Full Auto Sync":
+        await trigger_full_auto_sync(update, context)
     else:
         pass
 
