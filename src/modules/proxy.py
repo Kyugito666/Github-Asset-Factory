@@ -375,7 +375,15 @@ def convert_proxylist_to_http(input_file, output_file):
         if dups > 0: logger.info(f"Removed {dups} duplicates.")
         with open(output_file, "w", encoding='utf-8') as f: f.write('\n'.join(unique) + '\n')
         logger.info(f"Converted {len(unique)} unique proxies to '{os.path.basename(output_file)}'.")
-        try: os.remove(input_file); logger.info(f"Removed temp '{os.path.basename(input_file)}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
+        
+        # --- FIX 3 (Area ~Baris 378) ---
+        try:
+            os.remove(input_file)
+            logger.info(f"Removed temp '{os.path.basename(input_file)}'.")
+        except OSError as e:
+            logger.warning(f"Could not remove '{input_file}': {e}")
+        # --- AKHIR FIX 3 ---
+            
         return True
     except IOError as e: logger.error(f"Failed write to '{output_file}': {e}"); return False
 
@@ -415,12 +423,11 @@ def check_proxy_final(proxy):
             try: j = r.json(); is_json_ip = isinstance(j, dict) and ('ip' in j or 'origin' in j)
             except json.JSONDecodeError: pass
             
-            # --- FIX 3 (Area ~Baris 417) ---
+            # --- FIX 4 (Area ~Baris 417) ---
             # Menutup string literal r'...' dengan benar
-            if is_json_ip or re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', content): 
+            if is_json_ip or re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', content):
+            # --- AKHIR FIX 4 ---
                 return proxy, True, f"OK via {url}"
-            # --- AKHIR FIX 3 ---
-            
             else: logger.debug(f"Proxy {proxy.split('@')[-1]} unexpected content {url}: {content[:60]}...")
         except requests.exceptions.HTTPError as e:
              if e.response.status_code == 407: return proxy, False, "Auth Required (407)"
