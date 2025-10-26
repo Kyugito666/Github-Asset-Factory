@@ -155,7 +155,6 @@ def remove_ip(session: requests.Session, ip: str, authorization_id: int, plan_id
             try: error_detail = response.json()
             except: error_detail = response.text[:100]
             logger.error(f"       -> ERROR removing {ip}: Status {response.status_code} - {error_detail}")
-            # response.raise_for_status() # Jangan throw, log saja
             return False
     except requests.RequestException as e:
         logger.error(f"       -> ERROR: Connection error removing {ip}: {e}")
@@ -175,7 +174,6 @@ def add_ip(session: requests.Session, ip: str, plan_id: str):
             try: error_detail = response.json()
             except: error_detail = response.text[:100]
             logger.error(f"       -> ERROR adding {ip}: Status {response.status_code} - {error_detail}")
-            # response.raise_for_status()
             return False
     except requests.RequestException as e:
         logger.error(f"       -> ERROR: Connection error adding {ip}: {e}")
@@ -200,7 +198,6 @@ def run_webshare_ip_sync() -> bool:
     for api_key in api_keys:
         email_info = "[Fetching Email...]"
         try:
-             # Cek email dulu untuk logging
              with requests.Session() as email_session:
                  email_session.headers.update({"Authorization": f"Token {api_key}", "Accept": "application/json"})
                  email_info = get_account_email(email_session)
@@ -208,63 +205,52 @@ def run_webshare_ip_sync() -> bool:
              email_info = "[Error Fetching Email]"
 
         logger.info(f"\n--- Processing Key: [...{api_key[-6:]}] (Account: {email_info}) ---")
-        account_success = False # Status sukses per akun
+        account_success = False
 
         with requests.Session() as session:
             session.headers.update({
                 "Authorization": f"Token {api_key}",
-                "Content-Type": "application/json", # Penting untuk POST/DELETE
+                "Content-Type": "application/json",
                 "Accept": "application/json"
             })
             try:
                 plan_id = get_target_plan_id(session)
                 if not plan_id:
                     logger.error("   -> Skipping account: Could not determine Plan ID.")
-                    overall_success = False # Gagal jika plan ID tidak ketemu
-                    continue # Lanjut ke key berikutnya
+                    overall_success = False
+                    continue
 
                 authorized_ips_map = get_authorized_ips(session, plan_id)
                 existing_ips = list(authorized_ips_map.keys())
 
                 if new_ip in existing_ips:
-                    logger.info(f"   -> New IP ({new_ip}) is already authorized. No changes needed for this account.")
-                    account_success = True # Anggap sukses jika IP sudah ada
-                    continue # Lanjut ke key berikutnya
+                    logger.info(f"   -> New IP ({new_ip}) already authorized. No changes needed.")
+                    account_success = True
+                    continue
 
-                # Proses Hapus IP Lama
                 logger.info("\nWebshare IP Sync: 4. Removing old authorized IPs...")
-                removed_count = 0
-                failed_remove_count = 0
-                if not authorized_ips_map:
-                    logger.info("   -> No old IPs to remove.")
+                removed_count = 0; failed_remove_count = 0
+                if not authorized_ips_map: logger.info("   -> No old IPs to remove.")
                 else:
                     for ip_to_delete, auth_id_to_delete in authorized_ips_map.items():
-                        if ip_to_delete != new_ip: # Pastikan tidak hapus IP baru jika somehow ada
-                            if remove_ip(session, ip_to_delete, auth_id_to_delete, plan_id):
-                                removed_count += 1
-                            else:
-                                failed_remove_count += 1
+                        if ip_to_delete != new_ip:
+                            if remove_ip(session, ip_to_delete, auth_id_to_delete, plan_id): removed_count += 1
+                            else: failed_remove_count += 1
                     logger.info(f"   -> Removal Summary: {removed_count} removed, {failed_remove_count} failed.")
-                    if failed_remove_count > 0:
-                        overall_success = False # Gagal jika ada yg gagal dihapus
+                    if failed_remove_count > 0: overall_success = False
 
-                # Proses Tambah IP Baru
                 logger.info("\nWebshare IP Sync: 5. Adding new IP...")
                 if add_ip(session, new_ip, plan_id):
-                    account_success = (failed_remove_count == 0) # Sukses jika tambah OK DAN hapus OK
+                    account_success = (failed_remove_count == 0) # Sukses jika tambah & hapus OK
                 else:
-                    account_success = False # Gagal jika add gagal
-                    overall_success = False
+                    account_success = False; overall_success = False
 
             except Exception as e:
-                logger.error(f"   -> !!! UNEXPECTED ERROR processing this account: {e}", exc_info=True)
-                overall_success = False # Gagal jika ada exception
+                logger.error(f"   -> !!! UNEXPECTED ERROR processing account: {e}", exc_info=True)
+                overall_success = False
 
-        if account_success:
-             logger.info(f"--- Account [...{api_key[-6:]}] finished successfully. ---")
-        else:
-             logger.error(f"--- Account [...{api_key[-6:]}] finished with errors. ---")
-
+        if account_success: logger.info(f"--- Account [...{api_key[-6:]}] finished successfully. ---")
+        else: logger.error(f"--- Account [...{api_key[-6:]}] finished with errors. ---")
 
     logger.info(f"===== Webshare IP Authorization Sync Finished (Overall Success: {overall_success}) =====")
     return overall_success
@@ -277,22 +263,14 @@ def get_webshare_download_url(session: requests.Session, plan_id: str):
         response = session.get(WEBSHARE_CONFIG_URL, params=params, timeout=WEBSHARE_API_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-        username = data.get("username") # Perlu username
-        token = data.get("proxy_list_download_token") # Perlu token
-
+        username = data.get("username")
+        token = data.get("proxy_list_download_token")
         if not username or not token:
-            logger.error("   -> ERROR: 'username' or 'proxy_list_download_token' missing in /config/ response.")
+            logger.error("   -> ERROR: 'username' or 'token' missing in /config/ response.")
             return None
-
-        # Bangun URL download pakai format
-        download_url = WEBSHARE_DOWNLOAD_URL_FORMAT.format(
-            token=token,
-            username=username, # Masukkan username ke format
-            plan_id=plan_id
-        )
+        download_url = WEBSHARE_DOWNLOAD_URL_FORMAT.format(token=token, username=username, plan_id=plan_id)
         logger.info(f"       -> Successfully generated download URL.")
         return download_url
-
     except requests.exceptions.HTTPError as e:
         logger.error(f"   -> ERROR: HTTP Error getting download config: {e.response.status_code} - {e.response.text[:100]}")
         return None
@@ -300,35 +278,27 @@ def get_webshare_download_url(session: requests.Session, plan_id: str):
         logger.error(f"   -> ERROR: Connection error getting download config: {e}")
         return None
 
-# --- FUNGSI LOGIKA PROXY SYNC LAINNYA (Adaptasi dari ProxySync) ---
+# --- FUNGSI LOGIKA PROXY SYNC LAINNYA ---
 
 def load_apis(file_path):
     """Memuat daftar URL API download manual."""
     if not os.path.exists(file_path):
         logger.warning(f"Manual API list file not found: {file_path}. Creating empty file.")
-        try:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, "w", encoding='utf-8') as f:
-                f.write("# Masukkan URL API download proxy MANUAL Anda di sini, satu per baris\n")
-        except IOError as e:
-            logger.error(f"Failed to create manual API list file: {e}")
+        try: os.makedirs(os.path.dirname(file_path), exist_ok=True); open(file_path, 'a', encoding='utf-8').close()
+        except IOError as e: logger.error(f"Failed create manual API list: {e}")
         return []
     try:
         with open(file_path, "r", encoding='utf-8') as f:
             urls = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
             logger.info(f"Loaded {len(urls)} manual API URL(s) from {os.path.basename(file_path)}.")
             return urls
-    except IOError as e:
-        logger.error(f"Failed to read manual API list file {file_path}: {e}")
-        return []
+    except IOError as e: logger.error(f"Failed read manual API list {file_path}: {e}"); return []
 
 def fetch_from_api(url, api_key: str = None):
     """Mengunduh dari satu URL API dengan retry + optional auth."""
     max_retries = 2
     headers = {'User-Agent': 'Mozilla/5.0'}
-    if api_key:
-        headers['Authorization'] = f"Token {api_key}"
-
+    if api_key: headers['Authorization'] = f"Token {api_key}"
     for attempt in range(max_retries):
         try:
             response = requests.get(url, timeout=45, headers=headers)
@@ -336,84 +306,69 @@ def fetch_from_api(url, api_key: str = None):
             content = response.text.strip()
             if content:
                 if content.lower().startswith("<!doctype html") or "<html" in content.lower():
-                     error_message = f"API returned HTML page."
-                     logger.warning(f"Warning for {url}: {error_message}")
-                     return url, [], error_message
+                     error_message = f"API returned HTML page."; logger.warning(f"Warning {url}: {error_message}"); return url, [], error_message
                 first_line = content.splitlines()[0] if '\n' in content else content
-                # Cek lebih ketat: harus ada newline ATAU format jelas IP:Port atau User:Pass@IP:Port
-                if '\n' in content or re.match(r"^\d{1,3}(\.\d{1,3}){3}:\d+", first_line) or ('@' in first_line and ':' in first_line):
-                     return url, content.splitlines(), None # Sukses
-                else:
-                     error_message = "API response format looks invalid (not a proxy list)."
-                     logger.warning(f"Warning for {url}: {error_message}. Content: {content[:100]}...")
-                     return url, [], error_message # Anggap gagal jika format aneh
-
+                if '\n' in content or re.match(r"^\d{1,3}(\.\d{1,3}){3}:\d+", first_line) or ('@' in first_line and ':' in first_line): return url, content.splitlines(), None # Sukses
+                else: error_message = "API response format invalid."; logger.warning(f"Warning {url}: {error_message}. Content: {content[:100]}..."); return url, [], error_message
             error_message = "API returned no content"
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401 and api_key:
-                error_message = "Unauthorized (401) - Invalid API Key?"
-                logger.error(f"Failed download {url}: {error_message}")
-                break # Gagal permanen
-            elif e.response.status_code == 429:
-                wait_time = 5 * (attempt + 1); logger.warning(f"Rate limit hit for {url}. Waiting {wait_time}s..."); time.sleep(wait_time); error_message = str(e); continue
-            else:
-                error_message = f"HTTP Error {e.response.status_code}"; logger.error(f"Failed download {url}: {error_message}"); break
-        except requests.exceptions.RequestException as e:
-            error_message = f"Connection Error: {e}"; logger.warning(f"Failed download attempt {attempt+1}/{max_retries} for {url}: {error_message}"); time.sleep(2 * (attempt + 1))
-    logger.error(f"Final failure downloading from {url} after {max_retries} attempts: {error_message}")
+            if e.response.status_code == 401 and api_key: error_message = "Unauthorized (401)"; logger.error(f"Failed {url}: {error_message}"); break
+            elif e.response.status_code == 429: wait_time = 5 * (attempt + 1); logger.warning(f"Rate limit {url}. Wait {wait_time}s..."); time.sleep(wait_time); error_message = str(e); continue
+            else: error_message = f"HTTP Error {e.response.status_code}"; logger.error(f"Failed {url}: {error_message}"); break
+        except requests.exceptions.RequestException as e: error_message = f"Connection Error: {e}"; logger.warning(f"Attempt {attempt+1}/{max_retries} {url}: {error_message}"); time.sleep(2 * (attempt + 1))
+    logger.error(f"Final failure {url} after {max_retries} attempts: {error_message}")
     return url, [], error_message
 
 def download_proxies_from_apis():
     """Download dari Webshare (auto) + Manual API ke file sementara."""
-    all_download_targets = [] # List of tuples: (url, api_key_or_None)
+    all_download_targets = []
 
     # 1. Webshare Auto-discovery
     logger.info("--- Starting Auto-Discovery from Webshare API Keys ---")
     webshare_api_keys = load_webshare_apikeys(WEBSHARE_APIKEYS_FILE)
-    if not webshare_api_keys: logger.info(f"'{os.path.basename(WEBSHARE_APIKEYS_FILE)}' empty. Skipping Webshare auto-download.")
+    if not webshare_api_keys: logger.info(f"'{os.path.basename(WEBSHARE_APIKEYS_FILE)}' empty. Skipping Webshare.")
     else:
         for api_key in webshare_api_keys:
             email_info = "[Fetching Email...]"
             try:
-                 with requests.Session() as email_session: email_session.headers.update({"Authorization": f"Token {api_key}", "Accept": "application/json"}); email_info = get_account_email(email_session)
-            except Exception: email_info = "[Error Fetching Email]"
-            logger.info(f"\n--- Processing Webshare Key: [...{api_key[-6:]}] (Account: {email_info}) ---")
-            with requests.Session() as session:
-                session.headers.update({"Authorization": f"Token {api_key}", "Accept": "application/json"})
+                 with requests.Session() as es: es.headers.update({"Authorization": f"Token {api_key}", "Accept": "application/json"}); email_info = get_account_email(es)
+            except Exception: email_info = "[Error Email]"
+            logger.info(f"\n--- Processing Webshare Key: [...{api_key[-6:]}] ({email_info}) ---")
+            with requests.Session() as s:
+                s.headers.update({"Authorization": f"Token {api_key}", "Accept": "application/json"})
                 try:
-                    plan_id = get_target_plan_id(session) # Pakai /config/
-                    if not plan_id: logger.error("   -> Skipping account: Could not determine Plan ID."); continue
-                    download_url = get_webshare_download_url(session, plan_id)
-                    if download_url: all_download_targets.append((download_url, api_key)); logger.info("   -> Added Webshare download URL.")
-                    else: logger.error("   -> Failed to get download URL.")
-                except Exception as e: logger.error(f"   -> !!! UNEXPECTED ERROR processing Webshare key: {e}", exc_info=False)
+                    plan_id = get_target_plan_id(s)
+                    if not plan_id: logger.error("   -> Skip: No Plan ID."); continue
+                    dl_url = get_webshare_download_url(s, plan_id)
+                    if dl_url: all_download_targets.append((dl_url, api_key)); logger.info("   -> Added Webshare URL.")
+                    else: logger.error("   -> Failed get download URL.")
+                except Exception as e: logger.error(f"   -> !!! ERROR processing key: {e}", exc_info=False)
 
     # 2. Manual URLs
     logger.info(f"\n--- Loading Manual URLs from '{os.path.basename(APILIST_SOURCE_FILE)}' ---")
     manual_urls = load_apis(APILIST_SOURCE_FILE)
-    if not manual_urls: logger.info("No manual API URLs found.")
+    if not manual_urls: logger.info("No manual URLs.")
     else: logger.info(f"Found {len(manual_urls)} manual URL(s)."); all_download_targets.extend([(url, None) for url in manual_urls])
 
     # 3. Download Gabungan
-    if not all_download_targets: logger.error("No API URLs found to download from."); return []
+    if not all_download_targets: logger.error("No API URLs found."); return []
     logger.info(f"\n--- Starting Download from {len(all_download_targets)} Total Sources ---")
-    all_downloaded_proxies = []; processed_count = 0; total_targets_count = len(all_download_targets)
+    all_proxies = []; count = 0; total = len(all_download_targets)
     for url, key in all_download_targets:
-        processed_count += 1; source_type = "Webshare" if key else "Manual"
-        logger.info(f"[{processed_count}/{total_targets_count}] Downloading ({source_type}) from {url[:70]}...")
+        count += 1; src_type = "Webshare" if key else "Manual"
+        logger.info(f"[{count}/{total}] Downloading ({src_type}) from {url[:70]}...")
         _, proxies, error = fetch_from_api(url, key)
-        if not error: logger.info(f"   -> Downloaded {len(proxies)} lines from {url[:70]}."); all_downloaded_proxies.extend(proxies)
-        time.sleep(1) # Jeda 1 detik
+        if not error: logger.info(f"   -> Downloaded {len(proxies)} lines."); all_proxies.extend(proxies)
+        time.sleep(1)
 
-    if not all_downloaded_proxies: logger.warning("No proxies were successfully downloaded."); return []
+    if not all_proxies: logger.warning("No proxies downloaded."); return []
 
     # 4. Simpan ke file sementara
     try:
         os.makedirs(os.path.dirname(PROXYLIST_SOURCE_FILE), exist_ok=True)
-        with open(PROXYLIST_SOURCE_FILE, "w", encoding='utf-8') as f:
-            for proxy in all_downloaded_proxies: f.write(proxy + "\n")
-        logger.info(f"Saved {len(all_downloaded_proxies)} downloaded lines to temporary file '{os.path.basename(PROXYLIST_SOURCE_FILE)}'.")
-        return all_downloaded_proxies
+        with open(PROXYLIST_SOURCE_FILE, "w", encoding='utf-8') as f: f.write('\n'.join(all_proxies) + '\n')
+        logger.info(f"Saved {len(all_proxies)} lines to temp file '{os.path.basename(PROXYLIST_SOURCE_FILE)}'.")
+        return all_proxies
     except IOError as e: logger.error(f"Failed write to '{PROXYLIST_SOURCE_FILE}': {e}"); return []
 
 
@@ -424,11 +379,17 @@ def convert_proxylist_to_http(input_file, output_file):
         with open(input_file, "r", encoding='utf-8', errors='ignore') as f: lines = f.readlines()
     except IOError as e: logger.error(f"Failed read '{input_file}': {e}"); return False
 
+    # FIX BAGIAN INI: Handle jika file kosong
     if not lines:
-        logger.info(f"'{input_file}' is empty. Nothing to convert.");
-        if os.path.exists(output_file): try: os.remove(output_file); logger.info(f"Removed empty output '{output_file}'.") except OSError as e: logger.warning(f"Could not remove '{output_file}': {e}")
-        try: os.remove(input_file); logger.info(f"Removed empty input '{input_file}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
-        return True # Sukses jika input kosong
+        logger.info(f"'{os.path.basename(input_file)}' is empty. Nothing to convert.")
+        # Hapus file output jika ada
+        if os.path.exists(output_file):
+            try: os.remove(output_file); logger.info(f"Removed potentially empty output file '{os.path.basename(output_file)}'.")
+            except OSError as e: logger.warning(f"Could not remove existing output file '{output_file}': {e}")
+        # Hapus file input juga
+        try: os.remove(input_file); logger.info(f"Removed empty input file '{os.path.basename(input_file)}'.")
+        except OSError as e: logger.warning(f"Could not remove empty input file '{input_file}': {e}")
+        return True # Anggap sukses jika input kosong
 
     cleaned_proxies_raw = []
     for line in lines:
@@ -439,8 +400,8 @@ def convert_proxylist_to_http(input_file, output_file):
         cleaned_proxies_raw.append(line)
 
     if not cleaned_proxies_raw:
-        logger.info(f"'{input_file}' has no valid content. Nothing to convert.");
-        try: os.remove(input_file); logger.info(f"Removed empty/commented '{input_file}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
+        logger.info(f"'{os.path.basename(input_file)}' has no valid content after cleaning. Nothing to convert.")
+        try: os.remove(input_file); logger.info(f"Removed empty/commented '{os.path.basename(input_file)}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
         return True
 
     converted_proxies = []; malformed_count = 0; processed_count = 0; total_raw = len(cleaned_proxies_raw)
@@ -450,23 +411,19 @@ def convert_proxylist_to_http(input_file, output_file):
 
     for p in cleaned_proxies_raw:
         processed_count += 1; converted = None
-        # Prioritas 1: user:pass@host:port
         match_a = re.match(rf"^(?P<user_pass>.+)@(?P<host>{host_pattern}):(?P<port>{port_pattern})$", p)
         if match_a:
             port_str = match_a.group("port")
             if port_str.isdigit() and 1 <= int(port_str) <= 65535: converted = f"http://{p}"
             else: malformed_count += 1; logger.debug(f"Skip invalid port(A): {p}")
-        # Prioritas 2: host:port:user:pass
         elif p.count(':') == 3 and '@' not in p:
             parts = p.split(':'); host, port_str, user, password = parts
             if re.match(rf"^{host_pattern}$", host) and port_str.isdigit() and 1 <= int(port_str) <= 65535: converted = f"http://{user}:{password}@{host}:{port_str}"
             else: malformed_count += 1; logger.debug(f"Skip invalid host/port(B): {p}")
-        # Prioritas 3: host:port
         elif p.count(':') == 1 and '@' not in p:
             parts = p.split(':'); host, port_str = parts
             if re.match(rf"^{host_pattern}$", host) and port_str.isdigit() and 1 <= int(port_str) <= 65535: converted = f"http://{host}:{port_str}"
             else: malformed_count += 1; logger.debug(f"Skip invalid host/port(C): {p}")
-        # Prioritas 4: host:port@user:pass (kurang umum)
         elif '@' in p and p.count(':') == 2:
              try: host_part, user_part = p.split('@', 1); host, port_str = host_part.split(':', 1); user, password = user_part.split(':', 1)
              except ValueError: malformed_count += 1; logger.debug(f"Skip malformed(D): {p}"); continue
@@ -474,16 +431,14 @@ def convert_proxylist_to_http(input_file, output_file):
              else: malformed_count += 1; logger.debug(f"Skip invalid host/port(D): {p}")
 
         if converted: converted_proxies.append(converted)
-        elif converted is None: # Gagal konversi
-             malformed_count += 1
-             # logger.debug(f"Unrecognized format skipped: {p}")
+        elif converted is None: malformed_count += 1
 
         if processed_count % 1000 == 0: logger.info(f"Conversion progress: {processed_count}/{total_raw} lines...")
 
     if malformed_count > 0: logger.warning(f"Skipped {malformed_count} lines (unrecognized/invalid format).")
     if not converted_proxies:
         logger.error("No valid proxies could be converted.");
-        try: os.remove(input_file); logger.info(f"Removed empty/failed '{input_file}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
+        try: os.remove(input_file); logger.info(f"Removed empty/failed '{os.path.basename(input_file)}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
         return False
 
     try:
@@ -493,8 +448,8 @@ def convert_proxylist_to_http(input_file, output_file):
         if duplicates_removed > 0: logger.info(f"Removed {duplicates_removed} duplicates during conversion.")
         with open(output_file, "w", encoding='utf-8') as f:
             for proxy in unique_converted: f.write(proxy + "\n")
-        logger.info(f"Successfully converted {len(unique_converted)} unique proxies to '{output_file}'.")
-        try: os.remove(input_file); logger.info(f"Removed temporary '{input_file}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
+        logger.info(f"Successfully converted {len(unique_converted)} unique proxies to '{os.path.basename(output_file)}'.")
+        try: os.remove(input_file); logger.info(f"Removed temporary '{os.path.basename(input_file)}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
         return True
     except IOError as e: logger.error(f"Failed write to '{output_file}': {e}"); return False
 
@@ -505,6 +460,7 @@ def load_and_deduplicate_proxies(file_path):
     try:
         with open(file_path, "r", encoding='utf-8', errors='ignore') as f: proxies = [line.strip() for line in f if line.strip() and not line.startswith("#")]
     except IOError as e: logger.error(f"Failed read {file_path} for deduplication: {e}"); return []
+    if not proxies: logger.info(f"'{os.path.basename(file_path)}' is empty. No proxies to deduplicate."); return []
 
     unique_proxies = sorted(list(set(proxies)))
     removed_count = len(proxies) - len(unique_proxies)
@@ -514,8 +470,8 @@ def load_and_deduplicate_proxies(file_path):
             with open(file_path, "w", encoding='utf-8') as f:
                 for proxy in unique_proxies: f.write(proxy + "\n")
             logger.info(f"Overwrote '{os.path.basename(file_path)}' with {len(unique_proxies)} unique proxies.")
-        except IOError as e: logger.error(f"Failed overwrite {file_path} after deduplication: {e}"); return unique_proxies
-    elif len(proxies) > 0: logger.info(f"No duplicates in '{os.path.basename(file_path)}' ({len(proxies)} unique).")
+        except IOError as e: logger.error(f"Failed overwrite {file_path} after deduplication: {e}"); return unique_proxies # Return list if write fails
+    else: logger.info(f"No duplicates found in '{os.path.basename(file_path)}' ({len(proxies)} unique).")
     return unique_proxies
 
 
@@ -553,7 +509,7 @@ def run_proxy_test(proxies_to_test):
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     try:
         future_map = {executor.submit(check_proxy_final, p): p for p in proxies_to_test}
-        log_interval = max(1, total // 20)
+        log_interval = max(1, total // 20) if total > 0 else 1 # Hindari /0
         for future in as_completed(future_map):
             try:
                 proxy, is_good, message = future.result(); tested_count += 1
@@ -567,7 +523,7 @@ def run_proxy_test(proxies_to_test):
             os.makedirs(os.path.dirname(FAIL_PROXY_FILE), exist_ok=True)
             with open(FAIL_PROXY_FILE, "w", encoding='utf-8') as f:
                 for p, reason in failed_details: f.write(f"{p} # {reason}\n")
-            logger.info(f"Saved {len(failed_details)} failed to '{FAIL_PROXY_FILE}'.")
+            logger.info(f"Saved {len(failed_details)} failed to '{os.path.basename(FAIL_PROXY_FILE)}'.")
         except IOError as e: logger.error(f"Failed save failed proxies: {e}")
     logger.info(f"Test complete. Good: {len(good_proxies)}/{total}.")
     return good_proxies
@@ -582,11 +538,8 @@ def sync_proxies() -> bool:
     if ENABLE_WEBSHARE_IP_SYNC:
         logger.info("--- Step 0: Webshare IP Authorization Sync ---")
         ip_sync_success = run_webshare_ip_sync()
-        if not ip_sync_success:
-            logger.warning("Webshare IP Sync finished with errors. Continuing sync...")
-            # overall_status = False # Jangan set False, biarkan proxy lain dicoba
-    else:
-        logger.info("--- Step 0: Webshare IP Authorization Sync (Skipped by config) ---")
+        if not ip_sync_success: logger.warning("Webshare IP Sync finished with errors. Continuing sync...")
+    else: logger.info("--- Step 0: Webshare IP Authorization Sync (Skipped by config) ---")
 
     # Step 1: Download (Webshare + Manual) -> data/proxylist_downloaded.txt
     logger.info("--- Step 1: Downloading Proxies ---")
@@ -595,10 +548,8 @@ def sync_proxies() -> bool:
     # Step 2: Konversi hasil download -> data/proxy.txt
     if downloaded:
         logger.info("--- Step 2: Converting Downloaded Proxies ---")
-        if not convert_proxylist_to_http(PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE):
-             logger.error("Conversion failed. Aborting sync."); return False
-    else:
-        logger.warning("No proxies downloaded. Using existing 'proxy.txt' (if any).")
+        if not convert_proxylist_to_http(PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE): logger.error("Conversion failed. Aborting sync."); return False
+    else: logger.warning("No proxies downloaded. Using existing 'proxy.txt' (if any).")
 
     # Step 3: Backup data/proxy.txt -> history/proxy_backup.txt
     logger.info("--- Step 3: Backing Up Current Proxy List ---")
@@ -637,13 +588,16 @@ def sync_proxies() -> bool:
 # Testing entry point
 if __name__ == "__main__":
     print("Running proxy module directly for testing (incl. Webshare IP Sync)...")
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    # Dummy files
-    if not os.path.exists(APILIST_SOURCE_FILE): os.makedirs(os.path.dirname(APILIST_SOURCE_FILE), exist_ok=True); open(APILIST_SOURCE_FILE, 'a').close()
-    if not os.path.exists(WEBSHARE_APIKEYS_FILE): os.makedirs(os.path.dirname(WEBSHARE_APIKEYS_FILE), exist_ok=True); open(WEBSHARE_APIKEYS_FILE, 'a').close()
+    # Setup basic logging ke console untuk testing HANYA jika dijalankan langsung
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
 
-    os.environ['ENABLE_WEBSHARE_IP_SYNC'] = 'true'
-    from ..config import ENABLE_WEBSHARE_IP_SYNC
+    # Dummy files
+    if not os.path.exists(APILIST_SOURCE_FILE): os.makedirs(os.path.dirname(APILIST_SOURCE_FILE), exist_ok=True); open(APILIST_SOURCE_FILE, 'a').close(); print(f"Created dummy {os.path.basename(APILIST_SOURCE_FILE)}")
+    if not os.path.exists(WEBSHARE_APIKEYS_FILE): os.makedirs(os.path.dirname(WEBSHARE_APIKEYS_FILE), exist_ok=True); open(WEBSHARE_APIKEYS_FILE, 'a').close(); print(f"Created dummy {os.path.basename(WEBSHARE_APIKEYS_FILE)}")
+
+    os.environ['ENABLE_WEBSHARE_IP_SYNC'] = 'true' # Force enable
+    from ..config import ENABLE_WEBSHARE_IP_SYNC # Re-import
     print(f"Webshare IP Sync Enabled for test: {ENABLE_WEBSHARE_IP_SYNC}")
     success = sync_proxies()
     print(f"\nSync process completed. Success: {success}")
