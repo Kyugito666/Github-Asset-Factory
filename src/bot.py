@@ -524,7 +524,7 @@ async def run_full_sync_task(chat_id: str):
             
     except Exception as e:
         duration = time.time() - start_time
-        logger.error(message_prefix + f"Error ({duration:.2f}s): {e)", exc_info=True)
+        logger.error(message_prefix + f"Error ({duration:.2f}s): {e}", exc_info=True)
         await asyncio.to_thread(send_text_message, 
             f"❌ Error fatal saat full sync ({duration:.1f}s): {str(e)[:150]}. Cek log.", chat_id)
 
