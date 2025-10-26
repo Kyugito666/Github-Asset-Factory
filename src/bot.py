@@ -196,8 +196,10 @@ async def run_generation_task(chat_id: int, persona_type: str):
 # ============================================================
 # HANDLER UNTUK GMAIL DOT TRICK
 # ============================================================
-async def dot_trick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menampilkan pilihan email untuk Dot Trick."""
+# Ganti fungsi dot_trick_handler di src/bot.py
+
+async def dot_trick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    """Menampilkan pilihan email untuk Dot Trick dengan pagination."""
     is_callback = update.callback_query is not None
     target_message = update.callback_query.message if is_callback else update.message
     if not target_message:
@@ -210,111 +212,112 @@ async def dot_trick_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await target_message.reply_text("⚠️ `data/gmail.txt` kosong atau tidak ditemukan!", reply_markup=get_main_keyboard())
             return
 
-        buttons_per_row = 1
-        max_buttons = 25
+        # Pagination settings
+        items_per_page = 50  # Naikkan dari 25 ke 50
+        total_pages = (len(all_emails) + items_per_page - 1) // items_per_page
+        start_idx = page * items_per_page
+        end_idx = min(start_idx + items_per_page, len(all_emails))
+        
+        current_page_emails = all_emails[start_idx:end_idx]
+
+        # Buat tombol inline untuk email di halaman ini
         keyboard = []
-        for i, email in enumerate(all_emails[:max_buttons]):
+        for i, email in enumerate(current_page_emails):
+            actual_index = start_idx + i  # Index asli di list lengkap
             display_email = email if len(email) <= 40 else email[:37] + "..."
-            keyboard.append([InlineKeyboardButton(f"📧 {display_email}", callback_data=f"dottrick_{i}")])
+            keyboard.append([InlineKeyboardButton(f"📧 {display_email}", callback_data=f"dottrick_{actual_index}")])
 
-        if len(all_emails) > max_buttons:
-            keyboard.append([InlineKeyboardButton(f"... ({len(all_emails) - max_buttons} more)", callback_data="dummy_toolong")])
+        # Tombol navigasi halaman
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"dottrick_page_{page-1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton("➡️ Next", callback_data=f"dottrick_page_{page+1}"))
+        
+        if nav_buttons:
+            keyboard.append(nav_buttons)
 
+        # Tombol footer
         keyboard.append([InlineKeyboardButton("📊 Lihat Statistik", callback_data="dottrick_stats")])
         keyboard.append([InlineKeyboardButton("❌ Batal", callback_data="cancel")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        message_text = "📧 **Gmail Dot Trick**\nPilih email dari `data/gmail.txt` untuk generate variasi baru:"
+        message_text = (f"📧 **Gmail Dot Trick**\n"
+                       f"Pilih email untuk generate variasi baru:\n\n"
+                       f"Halaman {page+1}/{total_pages} (Total: {len(all_emails)} emails)")
 
         if is_callback:
-             await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup)
+             await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         else:
-             await target_message.reply_text(message_text, reply_markup=reply_markup)
+             await target_message.reply_text(message_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
         logger.error(f"Error in dot_trick_handler: {e}", exc_info=True)
         await target_message.reply_text(f"❌ Error menampilkan daftar email: {str(e)}", reply_markup=get_main_keyboard())
 
-async def trigger_dot_trick_generation(query, index: int, context: ContextTypes.DEFAULT_TYPE):
-    """Memulai generasi Dot Trick untuk email terpilih."""
-    if not query or not query.message:
-        logger.error("Cannot trigger dot trick: invalid query/message")
-        return
-    chat_id = str(query.message.chat_id)
-    try:
-        gmail_list = load_gmail_list()
-        if index < 0 or index >= len(gmail_list):
-            await query.answer("❌ Index email tidak valid.", show_alert=True)
-            await query.edit_message_text("❌ Error: Email tidak ditemukan. Silakan coba lagi.", reply_markup=None)
-            return
-        email = gmail_list[index]
-    except Exception as e:
-        logger.error(f"Error getting email for dot trick index {index}: {e}")
-        await query.answer("❌ Gagal memproses pilihan.", show_alert=True)
-        await query.edit_message_text(f"❌ Error: {str(e)}", reply_markup=None)
+
+# Tambahkan handler untuk navigasi halaman di callback_handler:
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Router untuk callback query dari inline button."""
+    query = update.callback_query
+    if not query or not query.data:
         return
 
-    try:
-        await query.edit_message_text(f"⏳ Generating variasi untuk:\n`{email}`...", parse_mode=ParseMode.MARKDOWN, reply_markup=None)
-    except Exception as e:
-        logger.warning(f"Failed edit message for dot trick gen: {e}")
-        await context.bot.send_message(chat_id=chat_id, text=f"⏳ Generating variasi untuk:\n`{email}`...", parse_mode=ParseMode.MARKDOWN)
-
-    context.application.create_task(run_dot_trick_task(email=email, chat_id=chat_id))
-
-async def run_dot_trick_task(email: str, chat_id: str):
-    """Task async untuk generate dot trick dan kirim hasil."""
-    logger.info(f"Starting dot trick generation task for '{email}' (Chat ID: {chat_id})...")
-    start_time = time.time()
-    try:
-        existing = await asyncio.to_thread(get_generated_variations, email)
-        new_var = await asyncio.to_thread(generate_dot_tricks, email, existing)
-        duration = time.time() - start_time
-        logger.info(f"Dot trick generation for '{email}' finished in {duration:.3f}s. Result: {'Found' if new_var else 'Not Found/Failed'}")
-
-        if new_var:
-            await asyncio.to_thread(add_variation_to_history, email, new_var)
-            message = (f"✅ **Variasi Gmail Baru Ditemukan!**\n\n"
-                       f"📧 Email Asli:\n`{email}`\n\n"
-                       f"✨ Variasi Baru:\n`{new_var}`\n\n"
-                       f"_(Variasi ini sudah disimpan ke history)_")
-        else:
-            username_part = email.split('@')[0].replace('.', '')
-            if len(username_part) < 2:
-                message = (f"⚠️ **Gagal Generate Variasi**\n\n"
-                           f"📧 Email:\n`{email}`\n\n"
-                           f"❌ Alasan: Username '{username_part}' terlalu pendek (< 2 karakter) untuk dot trick.")
-            else:
-                message = (f"⚠️ **Tidak Ditemukan Variasi Baru**\n\n"
-                           f"📧 Email:\n`{email}`\n\n"
-                           f"❌ Mungkin semua kombinasi sudah pernah digenerate atau gagal setelah beberapa percobaan. Cek log server jika perlu.")
-
-        await asyncio.to_thread(send_text_message, message, chat_id)
-
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.error(f"Error in run_dot_trick_task for '{email}' ({duration:.2f}s): {e}", exc_info=True)
-        await asyncio.to_thread(send_text_message, f"❌ Error fatal saat generate dot trick untuk `{email}`: {str(e)[:200]}", chat_id)
-
-async def show_dot_trick_stats(query):
-    """Menampilkan statistik Dot Trick dari callback."""
-    if not query:
-        return
     try:
         await query.answer()
-        stats_gmail = get_stats()
-        message = (f"📊 **Statistik Gmail Dot Trick**\n\n"
-                   f"• Email di `data/gmail.txt`: `{stats_gmail['total_emails_in_file']}`\n"
-                   f"• Email dengan History: `{stats_gmail['emails_with_variations']}`\n"
-                   f"• Total Variasi Tersimpan: `{stats_gmail['total_variations_generated']}`")
-
-        keyboard = [[InlineKeyboardButton("🔙 Kembali ke Daftar Email", callback_data="dottrick_backtolist")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Error showing dot trick stats: {e}", exc_info=True)
-        await query.answer("❌ Gagal menampilkan statistik.", show_alert=True)
+        logger.warning(f"Failed to answer callback query (might be expired): {e}")
+
+    data = query.data
+
+    if data == "cancel":
+        try:
+            await query.edit_message_text("❌ Operasi dibatalkan.", reply_markup=None)
+        except Exception:
+             if query.message:
+                 await query.message.reply_text("❌ Operasi dibatalkan.", reply_markup=get_main_keyboard())
+             else:
+                 logger.error("Callback 'cancel' failed: No message to reply to/edit.")
+    
+    # TAMBAHKAN INI - Handler untuk pagination
+    elif data.startswith("dottrick_page_"):
+        try:
+            page_num = int(data.replace("dottrick_page_", ""))
+            await dot_trick_handler(update, context, page=page_num)
+        except ValueError:
+            logger.error(f"Invalid page number in callback: {data}")
+            await query.answer("❌ Halaman tidak valid.", show_alert=True)
+    
+    elif data == "random_generate":
+        persona_type = random.choice(ALL_PERSONAS)
+        await trigger_generation(query, persona_type, context)
+    elif data.startswith("persona_"):
+        persona_type = data.replace("persona_", "")
+        await trigger_generation(query, persona_type, context)
+    elif data == "dottrick_stats":
+        await show_dot_trick_stats(query)
+    elif data.startswith("dottrick_"):
+        try:
+             index_str = data.replace("dottrick_", "")
+             if index_str.isdigit():
+                 index = int(index_str)
+                 await trigger_dot_trick_generation(query, index, context)
+             elif index_str == "backtolist":
+                  pass
+             else:
+                  logger.error(f"Invalid non-numeric index in dottrick callback: {data}")
+                  await query.answer("❌ Data callback tidak valid.", show_alert=True)
+        except ValueError:
+             logger.error(f"Invalid index format in dottrick callback: {data}")
+             await query.answer("❌ Format data callback salah.", show_alert=True)
+    else:
+        logger.warning(f"Unhandled callback data: {data}")
+        await query.answer("Aksi tidak dikenali.")
+
+
+# Update handle_dottrick_backtolist untuk reset ke page 0:
 
 async def handle_dottrick_backtolist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Callback handler untuk tombol 'Kembali ke Daftar Email'."""
@@ -327,8 +330,7 @@ async def handle_dottrick_backtolist(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.warning(f"Minor error editing message on backtolist: {e}")
 
-    await dot_trick_handler(update, context)
-
+    await dot_trick_handler(update, context, page=0)  # Reset ke halaman pertama
 # ============================================================
 # HANDLER UNTUK PESAN TEKS (Router ke Fungsi Lain)
 # ============================================================
