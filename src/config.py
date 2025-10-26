@@ -126,42 +126,71 @@ class ProxyPool:
         self.failed_proxies: Dict[str, float] = {}
         self.cooldown_period = 300
 
+# ONLY the get_next_proxy method - REPLACE in existing ProxyPool class
+
     def get_next_proxy(self) -> Optional[str]:
-        """Dapatkan proxy berikutnya yang valid (tidak cooldown)."""
+        """
+        Dapatkan proxy berikutnya yang valid (tidak cooldown).
+        
+        CRITICAL FIX: Check fail_time BEFORE returning proxy
+        """
         if not self.pool:
             return None
 
         start_marker = next(self.pool)
         current = start_marker
         checked_count = 0
+        max_checks = len(self.proxies)
 
-        while checked_count < len(self.proxies):
+        while checked_count < max_checks:
             fail_time = self.failed_proxies.get(current)
-            if fail_time is None or (time.time() - fail_time > self.cooldown_period):
-                if fail_time is not None:
-                    try: del self.failed_proxies[current]
-                    except KeyError: pass
+            
+            # === CRITICAL FIX: Calculate cooldown BEFORE decision ===
+            if fail_time is not None:
+                time_since_fail = time.time() - fail_time
+                
+                if time_since_fail > self.cooldown_period:
+                    # Cooldown expired, remove from failed list
+                    try:
+                        del self.failed_proxies[current]
+                        logger.debug(f"Cooldown expired for {current.split('@')[-1]}")
+                    except KeyError:
+                        pass
+                    
+                    return current
+                else:
+                    # Still in cooldown, skip
+                    remaining = self.cooldown_period - time_since_fail
+                    logger.debug(f"Skip cooldown proxy {current.split('@')[-1]} ({remaining:.0f}s left)")
+            else:
+                # Not failed, use immediately
                 return current
-
+            
+            # Move to next
             current = next(self.pool)
             checked_count += 1
 
-            if current == start_marker and checked_count >= len(self.proxies):
-                 break
+            if current == start_marker and checked_count >= max_checks:
+                break
 
-        logger.warning(f"All {len(self.proxies)} proxies seem to be in cooldown.")
+        # === ALL PROXIES IN COOLDOWN ===
+        logger.warning(f"All {len(self.proxies)} proxies in cooldown.")
+        
         if self.failed_proxies:
             try:
+                # Return oldest failed (shortest remaining cooldown)
                 oldest_failed = min(self.failed_proxies, key=self.failed_proxies.get)
-                del self.failed_proxies[oldest_failed]
-                logger.info(f"Retrying oldest failed proxy: {oldest_failed.split('@')[-1]}")
-                while next(self.pool) != oldest_failed: pass
+                remaining = self.cooldown_period - (time.time() - self.failed_proxies[oldest_failed])
+                logger.info(f"⚠️ Using cooldown proxy: {oldest_failed.split('@')[-1]} ({remaining:.0f}s left)")
+                
+                # Don't delete from failed_proxies, let it track
                 return oldest_failed
+                
             except (ValueError, KeyError) as e:
-                 logger.error(f"Error finding oldest failed proxy: {e}. Returning None.")
-                 return None
+                logger.error(f"Error finding oldest failed proxy: {e}")
+                return None
 
-        logger.error("Proxy pool logic error: Could not select a proxy despite having options.")
+        logger.error("Proxy pool logic error.")
         return None
 
     def mark_failed(self, proxy: str):
