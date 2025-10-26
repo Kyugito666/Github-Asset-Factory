@@ -3,13 +3,14 @@ LLM Caller - Core AI calling dengan smart fallback
 
 OPTIMIZATIONS:
 - Smart proxy rotation (skip cooldown proxies)
-- Provider blacklist (skip known-failed providers)
+- Temporary provider cooldown (1 hour, not permanent)
 - Priority ordering (working providers first)
 """
 
 import litellm
 import logging
 import random
+import time
 
 from litellm import (
     Timeout, 
@@ -25,12 +26,10 @@ from .options import llm_call_options
 
 logger = logging.getLogger(__name__)
 
-# === TEMPORARY SKIP SYSTEM (1 HOUR COOLDOWN) ===
-import time
-
+# === TEMPORARY COOLDOWN SYSTEM (1 HOUR) ===
 _provider_cooldown = {}  # {provider: timestamp} - Skip for 1 hour
 _model_cooldown = {}     # {model_key: timestamp} - Skip for 1 hour
-COOLDOWN_DURATION = 3600  # 1 hour (quota bisa reset bulanan)
+COOLDOWN_DURATION = 3600  # 1 hour (quota reset bulanan)
 
 def _add_to_cooldown(provider: str, model_id: str, reason: str):
     """Add provider/model ke temporary cooldown (1 hour)."""
@@ -78,7 +77,7 @@ def call_llm(prompt: str):
     Call LLM dengan smart fallback.
     
     OPTIMIZATION FLOW:
-    1. Filter blacklisted providers/models
+    1. Filter cooldown providers/models (1h temporary)
     2. Prioritize: working > untested > failed
     3. Smart proxy rotation (skip cooldown)
     4. Max 3 retries per unique provider
@@ -87,23 +86,26 @@ def call_llm(prompt: str):
         logger.error("LLM call options not initialized.")
         return None
 
-    # === FILTER BLACKLISTED ===
+    # === FILTER COOLDOWN (NOT PERMANENT BAN) ===
     available_options = []
+    skipped_count = 0
+    
     for opt in llm_call_options:
         provider = opt["provider"]
         model_id = opt["params"].get("model", "")
-        key = f"{provider}:{model_id}"
         
-        if provider in _provider_blacklist:
-            continue
-        if key in _model_blacklist:
+        if _is_in_cooldown(provider, model_id):
+            skipped_count += 1
             continue
         
         available_options.append(opt)
     
     if not available_options:
-        logger.error("❌ All providers blacklisted. Reset dan restart service.")
+        logger.error(f"❌ All {len(llm_call_options)} options in cooldown. Wait 1h or restart.")
         return None
+    
+    if skipped_count > 0:
+        logger.info(f"⏸️ Skipped {skipped_count} options in cooldown")
     
     # === SMART SHUFFLE ===
     # Priority: Cohere, Mistral, OpenRouter > Gemini > Others
@@ -184,19 +186,19 @@ def call_llm(prompt: str):
             error_msg = str(e)
             logger.error(f"❌ Auth/BadRequest: {error_msg[:150]}. Next...")
             
-            # Add to blacklist if quota/payment issue
-            _add_to_blacklist(provider, model_id, error_msg)
+            # Add to temporary cooldown if quota/payment issue
+            _add_to_cooldown(provider, model_id, error_msg)
             
             continue
         
         except RateLimitError as e:
             logger.warning(f"⚠️ Rate Limited. Next...")
-            _add_to_blacklist(provider, model_id, str(e))
+            _add_to_cooldown(provider, model_id, str(e))
             continue
 
         except NotFoundError as e:
             logger.error(f"❌ Model Not Found: {model_id}. Next...")
-            _add_to_blacklist(provider, model_id, "404")
+            _add_to_cooldown(provider, model_id, "404")
             continue
 
         except Exception as e:
@@ -206,8 +208,8 @@ def call_llm(prompt: str):
                 PROXY_POOL.mark_failed(proxy_url)
             
             # Check if payment/quota error in generic exception
-            if "402" in str(e) or "payment" in str(e).lower():
-                _add_to_blacklist(provider, model_id, str(e))
+            if "402" in str(e) or "payment" in str(e).lower() or "quota" in str(e).lower():
+                _add_to_cooldown(provider, model_id, str(e))
             
             continue
 
