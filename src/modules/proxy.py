@@ -290,9 +290,23 @@ def convert_proxylist_to_http(input_file, output_file):
 
     if not lines:
         logger.info(f"'{os.path.basename(input_file)}' is empty. Convert skipped.")
-        if os.path.exists(output_file): try: os.remove(output_file); logger.info(f"Removed empty output '{os.path.basename(output_file)}'.") except OSError as e: logger.warning(f"Could not remove '{output_file}': {e}")
-        try: os.remove(input_file); logger.info(f"Removed empty input '{os.path.basename(input_file)}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
-        return True
+        
+        # --- FIX SYNTAX ERROR (Line 293) ---
+        if os.path.exists(output_file):
+            try:
+                os.remove(output_file)
+                logger.info(f"Removed empty output '{os.path.basename(output_file)}'.")
+            except OSError as e:
+                logger.warning(f"Could not remove '{output_file}': {e}")
+        
+        try:
+            os.remove(input_file)
+            logger.info(f"Removed empty input '{os.path.basename(input_file)}'.")
+        except OSError as e:
+            logger.warning(f"Could not remove '{input_file}': {e}")
+        # --- AKHIR FIX ---
+            
+        return True # Tetap return True
 
     cleaned_raw = []
     for line in lines:
@@ -304,7 +318,7 @@ def convert_proxylist_to_http(input_file, output_file):
 
     if not cleaned_raw:
         logger.info(f"'{os.path.basename(input_file)}' has no valid content. Convert skipped.")
-        # --- FIX BAGIAN INI ---
+        # --- FIX BAGIAN INI (Sudah benar dari file) ---
         try: # Pindahkan try ke sini
             os.remove(input_file)
             logger.info(f"Removed empty/commented '{os.path.basename(input_file)}'.")
