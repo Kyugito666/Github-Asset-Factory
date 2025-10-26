@@ -49,7 +49,6 @@
     {"suffix": "UserLM-8b", "litellm_id": "huggingface/microsoft/UserLM-8b", "max_tokens": 4096},
     {"suffix": "Schematron-3B", "litellm_id": "huggingface/inference-net/Schematron-3B", "max_tokens": 4096},
     {"suffix": "gpt-oss-20b-hf", "litellm_id": "huggingface/openai/gpt-oss-20b", "max_tokens": 4096},
-    {"suffix": "DeepSeek-V3.2-Exp", "litellm_id": "huggingface/deepseek-ai/DeepSeek-V3.2-Exp", "max_tokens": 8000},
     {"suffix": "Ring-1T", "litellm_id": "huggingface/inclusionAI/Ring-1T", "max_tokens": 4096},
     {"suffix": "gpt-oss-120b-hf", "litellm_id": "huggingface/openai/gpt-oss-120b", "max_tokens": 4096}
   ],
