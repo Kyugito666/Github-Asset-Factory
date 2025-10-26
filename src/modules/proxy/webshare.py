@@ -53,7 +53,8 @@ def load_webshare_apikeys(file_path):
         with open(file_path, "r", encoding='utf-8') as f:
             keys = [line.strip() for line in f 
                    if line.strip() and not line.strip().startswith("#")]
-            logger.info(f"Loaded {len(keys)} Webshare API key(s) from {os.path.basename(file_path)}.")
+            # Kurangi spam log, hanya info jika berhasil
+            # logger.info(f"Loaded {len(keys)} Webshare API key(s) from {os.path.basename(file_path)}.")
             return keys
     except IOError as e:
         logger.error(f"Failed read Webshare API key file {file_path}: {e}")
@@ -306,8 +307,8 @@ def run_webshare_ip_sync() -> bool:
     """
     logger.info("===== Starting Webshare IP Authorization Sync =====")
     
-    # === PERBAIKAN: IMPORT DIPINDAH KE SINI ===
-    from .core import WEBSHARE_APIKEYS_FILE
+    # === PERBAIKAN: IMPORT DIPINDAH KE SINI (Pastikan ini satu-satunya tempat import .core) ===
+    from .core import WEBSHARE_APIKEYS_FILE 
     # === AKHIR PERBAIKAN ===
     
     api_keys = load_webshare_apikeys(WEBSHARE_APIKEYS_FILE)
