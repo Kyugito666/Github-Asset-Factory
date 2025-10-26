@@ -14,7 +14,6 @@ import json
 import logging
 import requests
 
-from .core import WEBSHARE_APIKEYS_FILE
 
 logger = logging.getLogger(__name__)
 
