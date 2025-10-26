@@ -22,12 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Path setup
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROMPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "prompts")
+# === PERBAIKAN DI BAWAH INI ===
+# Path diubah dari os.path.dirname(SCRIPT_DIR) menjadi os.path.dirname(os.path.dirname(SCRIPT_DIR))
+# untuk naik dua level (dari .../src/services/llm ke .../src)
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "prompts")
+# === AKHIR PERBAIKAN ===
 
 # Global variables (akan di-populate di module load)
 BASE_PERSONA_PROMPT = ""
 ASSET_PROMPTS = {}
-llm_call_options = []
 
 
 # ============================================================
