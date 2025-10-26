@@ -291,7 +291,7 @@ def convert_proxylist_to_http(input_file, output_file):
     if not lines:
         logger.info(f"'{os.path.basename(input_file)}' is empty. Convert skipped.")
         
-        # --- FIX SYNTAX ERROR (Line 293) ---
+        # --- FIX 1 (Line 293) ---
         if os.path.exists(output_file):
             try:
                 os.remove(output_file)
@@ -304,7 +304,7 @@ def convert_proxylist_to_http(input_file, output_file):
             logger.info(f"Removed empty input '{os.path.basename(input_file)}'.")
         except OSError as e:
             logger.warning(f"Could not remove '{input_file}': {e}")
-        # --- AKHIR FIX ---
+        # --- AKHIR FIX 1 ---
             
         return True # Tetap return True
 
@@ -318,13 +318,11 @@ def convert_proxylist_to_http(input_file, output_file):
 
     if not cleaned_raw:
         logger.info(f"'{os.path.basename(input_file)}' has no valid content. Convert skipped.")
-        # --- FIX BAGIAN INI (Sudah benar dari file) ---
-        try: # Pindahkan try ke sini
+        try:
             os.remove(input_file)
             logger.info(f"Removed empty/commented '{os.path.basename(input_file)}'.")
-        except OSError as e: # Indentasi except harus sejajar try
+        except OSError as e:
             logger.warning(f"Could not remove temporary file '{input_file}': {e}")
-        # --- AKHIR FIX ---
         return True # Tetap return True
 
     converted = []; malformed = 0; count = 0; total = len(cleaned_raw)
@@ -356,9 +354,18 @@ def convert_proxylist_to_http(input_file, output_file):
         if count % 1000 == 0: logger.info(f"Convert progress: {count}/{total} lines...")
 
     if malformed > 0: logger.warning(f"Skipped {malformed} lines (format).")
+    
     if not converted:
         logger.error("No valid proxies converted.");
-        try: os.remove(input_file); logger.info(f"Removed failed '{os.path.basename(input_file)}'.") except OSError as e: logger.warning(f"Could not remove '{input_file}': {e}")
+        
+        # --- FIX 2 (Line 361) ---
+        try:
+            os.remove(input_file)
+            logger.info(f"Removed failed '{os.path.basename(input_file)}'.")
+        except OSError as e:
+            logger.warning(f"Could not remove '{input_file}': {e}")
+        # --- AKHIR FIX 2 ---
+            
         return False
 
     try:
