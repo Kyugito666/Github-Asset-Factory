@@ -1,9 +1,7 @@
 """
 Telegram Sender - Send messages ke Telegram dengan proxy support
 
-Functions:
-- send_text_message: Send text message dengan retry & proxy
-- send_persona_to_telegram: Send complete persona data (profile + files)
+CRITICAL FIX: parse_mode=None tidak boleh dikirim, harus di-remove dari payload
 """
 
 import logging
@@ -21,18 +19,7 @@ def send_text_message(message: str, chat_id: str = None) -> bool:
     """
     Send text message ke Telegram dengan proxy support & retry.
     
-    Features:
-    - Proxy rotation dari PROXY_POOL
-    - Retry mechanism (max 3x)
-    - Exponential backoff
-    - Error handling (rate limit, parse error, connection error)
-    
-    Args:
-        message: Text message untuk dikirim
-        chat_id: Target chat ID (default: TELEGRAM_CHAT_ID dari config)
-        
-    Returns:
-        bool: True jika berhasil, False jika gagal
+    CRITICAL FIX: Jika Markdown error, REMOVE parse_mode key, jangan set None
     """
     target_chat_id = chat_id or TELEGRAM_CHAT_ID
     
@@ -49,7 +36,6 @@ def send_text_message(message: str, chat_id: str = None) -> bool:
     }
     
     max_retries = 3
-    markdown_failed = False
 
     for attempt in range(1, max_retries + 1):
         proxies, proxy_url_display = None, "None"
@@ -71,14 +57,16 @@ def send_text_message(message: str, chat_id: str = None) -> bool:
             logger.error(f"HTTP Error sending text (Attempt {attempt}, Proxy: {proxy_url_display}): "
                         f"{e.response.status_code} - {e.response.text[:200]}")
             
-            # Handle Markdown parse error
+            # === CRITICAL FIX: Handle Markdown parse error ===
             if e.response.status_code == 400 and 'parse' in e.response.text.lower():
-                if not markdown_failed:
-                    logger.warning("Markdown parse error, switching to plain text...")
-                    payload['parse_mode'] = None
-                    markdown_failed = True
-                    # Retry immediately dengan parse_mode=None
-                    continue
+                logger.warning("Markdown parse error, retrying as plain text...")
+                
+                # REMOVE parse_mode key, don't set to None
+                if 'parse_mode' in payload:
+                    del payload['parse_mode']
+                
+                # Retry immediately dengan plain text
+                continue
             
             # Handle rate limiting
             elif e.response.status_code == 429:
@@ -118,14 +106,6 @@ def send_persona_to_telegram(persona_type: str, data: dict, chat_id: str = None)
     Process:
     1. Send profile message (formatted)
     2. Loop send setiap file sebagai code block
-    
-    Args:
-        persona_type: Tipe persona
-        data: Persona data dict
-        chat_id: Target chat ID
-        
-    Returns:
-        bool: True jika semua berhasil, False jika ada yang gagal
     """
     logger.info(f"Sending assets to Telegram (Target: {chat_id or 'default'})...")
     target_chat_id = chat_id or TELEGRAM_CHAT_ID
