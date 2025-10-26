@@ -176,18 +176,34 @@ def run_webshare_ip_sync() -> bool:
     logger.info(f"===== Webshare IP Sync Finished (Overall Success: {overall_success}) =====")
     return overall_success
 
+# src/modules/proxy.py - GANTI FUNGSI get_webshare_download_url
+
 def get_webshare_download_url(session: requests.Session, plan_id: str):
     """Mengambil URL download proxy dari /config/."""
     logger.info("Webshare Download:    -> Getting download URL via /config/ ...")
     params = {"plan_id": plan_id}
     try:
-        response = session.get(WEBSHARE_CONFIG_URL, params=params, timeout=WEBSHARE_API_TIMEOUT); response.raise_for_status()
-        data = response.json(); username = data.get("username"); token = data.get("proxy_list_download_token")
-        if not username or not token: logger.error("   -> ERROR: 'username' or 'token' missing."); return None
-        dl_url = WEBSHARE_DOWNLOAD_URL_FORMAT.format(token=token, username=username, plan_id=plan_id)
-        logger.info(f"       -> OK URL generated."); return dl_url
-    except requests.exceptions.HTTPError as e: logger.error(f"   -> ERROR HTTP getting DL config: {e.response.status_code} - {e.response.text[:100]}"); return None
-    except requests.RequestException as e: logger.error(f"   -> ERROR Connection getting DL config: {e}"); return None
+        response = session.get(WEBSHARE_CONFIG_URL, params=params, timeout=WEBSHARE_API_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        username = data.get("username")
+        token = data.get("proxy_list_download_token")
+        
+        if not username or not token:
+            logger.error("   -> ERROR: 'username' or 'token' missing.")
+            return None
+        
+        # FIX: Username dari API, bukan literal 'username'
+        dl_url = f"https://proxy.webshare.io/api/v2/proxy/list/download/{token}/-/any/{username}/direct/-/?plan_id={plan_id}"
+        logger.info(f"       -> OK URL generated.")
+        return dl_url
+        
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"   -> ERROR HTTP getting DL config: {e.response.status_code} - {e.response.text[:100]}")
+        return None
+    except requests.RequestException as e:
+        logger.error(f"   -> ERROR Connection getting DL config: {e}")
+        return None
 
 # --- FUNGSI LOGIKA PROXY SYNC LAINNYA ---
 
