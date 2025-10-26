@@ -22,15 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Path setup
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# === PERBAIKAN DI BAWAH INI ===
-# Path diubah dari os.path.dirname(SCRIPT_DIR) menjadi os.path.dirname(os.path.dirname(SCRIPT_DIR))
-# untuk naik dua level (dari .../src/services/llm ke .../src)
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "prompts")
-# === AKHIR PERBAIKAN ===
 
-# Global variables (akan di-populate di module load)
+# Global variables
 BASE_PERSONA_PROMPT = ""
 ASSET_PROMPTS = {}
+
+# === CRITICAL FIX: Initialize BEFORE use ===
+llm_call_options = []
+# === END FIX ===
 
 
 # ============================================================
@@ -57,23 +57,9 @@ except Exception as e:
 # ============================================================
 
 def get_proxy_for_provider(provider_prefix: str):
-    """
-    Return proxy string untuk provider, skip jika incompatible.
-    
-    Incompatible providers:
-    - groq: Tidak support proxy
-    - huggingface: Tidak support proxy
-    
-    Args:
-        provider_prefix: Provider name (lowercase)
-        
-    Returns:
-        Optional[str]: Proxy URL or None
-    """
     if not PROXY_POOL:
         return None
     
-    # List provider yang tidak support proxy
     incompatible_providers = ["groq", "huggingface"]
     
     if provider_prefix in incompatible_providers:
@@ -92,14 +78,6 @@ def get_proxy_for_provider(provider_prefix: str):
 # ============================================================
 
 def add_call_options(keys: list, provider: str, model_configs: list):
-    """
-    Add call options untuk satu provider.
-    
-    Args:
-        keys: List of API keys
-        provider: Provider display name (e.g., "Gemini")
-        model_configs: List of model config dicts dari models.json
-    """
     if not keys:
         return
     
@@ -116,11 +94,9 @@ def add_call_options(keys: list, provider: str, model_configs: list):
                 "proxy": get_proxy_for_provider(provider_lower)
             }
             
-            # Add custom_llm_provider jika ada
             if "custom_llm_provider" in model_config:
                 call_params["custom_llm_provider"] = model_config["custom_llm_provider"]
             
-            # Remove None values
             call_params = {k: v for k, v in call_params.items() if v is not None}
             
             llm_call_options.append({
@@ -156,7 +132,6 @@ try:
     
     logger.info(f"Successfully loaded model definitions from {models_json_path}")
     
-    # Build call options untuk setiap provider
     for provider_key, models_list in model_definitions.items():
         if provider_key in API_KEY_MAP:
             api_keys, display_name = API_KEY_MAP[provider_key]
@@ -169,7 +144,6 @@ try:
             logger.warning(f"Provider '{provider_key}' in models.json unknown. Skipping.")
     
     if llm_call_options:
-        # NOTE: Random shuffle dilakukan di caller.py setiap kali call
         logger.info(f"✅ Initialized {len(llm_call_options)} LLM call options.")
     else:
         logger.critical("❌ No valid LLM call options generated.")
