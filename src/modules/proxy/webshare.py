@@ -292,6 +292,13 @@ def run_webshare_ip_sync() -> bool:
     ...
     """
     logger.info("===== Starting Webshare IP Authorization Sync =====")
+
+    # === TAMBAHKAN BARIS INI DI SINI ===
+    from .core import WEBSHARE_APIKEYS_FILE
+    # === AKHIR TAMBAHAN ===
+
+    api_keys = load_webshare_apikeys(WEBSHARE_APIKEYS_FILE)
+    if not api_keys:
     
     api_keys = load_webshare_apikeys(WEBSHARE_APIKEYS_FILE)
     if not api_keys:
