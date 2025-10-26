@@ -289,18 +289,7 @@ def get_webshare_download_url(session: requests.Session, plan_id: str):
 def run_webshare_ip_sync() -> bool:
     """
     Main function untuk sync IP authorization ke semua Webshare accounts.
-    
-    Process:
-    1. Get current public IP
-    2. Load all Webshare API keys
-    3. For each account:
-       - Get Plan ID
-       - Get authorized IPs
-       - Remove old IPs
-       - Add new IP
-    
-    Returns:
-        bool: True if all accounts synced successfully
+    ...
     """
     logger.info("===== Starting Webshare IP Authorization Sync =====")
     
