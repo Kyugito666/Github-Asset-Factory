@@ -16,7 +16,7 @@ from .core import sync_proxies
 from .downloader import download_proxies_from_apis
 from .converter import convert_proxylist_to_http, load_and_deduplicate_proxies
 from .tester import run_proxy_test
-from .webshare import run_webshare_ip_sync
+from .webshare import run_webshare_ip_sync, load_webshare_apikeys
 
 # Re-export constants yang sering dipakai
 from .core import (
@@ -36,6 +36,7 @@ __all__ = [
     'load_and_deduplicate_proxies',
     'run_proxy_test',
     'run_webshare_ip_sync',
+    'load_webshare_apikeys',
     
     # Constants
     'PROXYLIST_SOURCE_FILE',
