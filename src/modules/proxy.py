@@ -1,3 +1,5 @@
+# src/modules/proxy.py
+
 import os
 import random
 import shutil
@@ -135,17 +137,23 @@ def convert_proxylist_to_http(input_file, output_file):
         if os.path.exists(output_file):
             try: os.remove(output_file); logger.info(f"Removed empty output file '{output_file}'.")
             except OSError as e: logger.warning(f"Could not remove existing empty output file '{output_file}': {e}")
-        return True
+        return True # Anggap sukses jika input kosong
 
-    # Tahap 1: Bersihkan prefix http/https jika ada
+    # Tahap 1: Bersihkan prefix http/https jika ada DAN baris kosong/komen
     cleaned_proxies_raw = []
     for line in lines:
         line = line.strip()
-        if not line: continue
-        # Hapus http:// atau https:// di awal jika ada
+        if not line or line.startswith("#"): continue # Skip komen dan baris kosong
         if line.startswith("http://"): line = line[7:]
         elif line.startswith("https://"): line = line[8:]
         cleaned_proxies_raw.append(line)
+
+    if not cleaned_proxies_raw:
+        logger.info(f"'{input_file}' contains only comments or empty lines. Nothing to convert.")
+        # Hapus file input jika kosong setelah dibersihkan
+        try: os.remove(input_file); logger.info(f"Removed empty/commented input file '{input_file}'.")
+        except OSError as e: logger.warning(f"Could not remove temporary file '{input_file}': {e}")
+        return True
 
     # Tahap 2: Konversi format
     converted_proxies = []
@@ -155,65 +163,68 @@ def convert_proxylist_to_http(input_file, output_file):
 
     logger.info(f"Starting conversion for {total_raw} raw proxy lines...")
 
+    # Regex untuk host (IP v4 atau domain) dan port
+    host_pattern = r"((?:[0-9]{1,3}\.){3}[0-9]{1,3}|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})"
+    port_pattern = r"[0-9]{1,5}"
+
     for p in cleaned_proxies_raw:
         processed_count += 1
-        # Cek format IP:PORT@USER:PASS (prioritas)
-        if '@' in p and p.count(':') == 2:
+        converted = None
+
+        # A. Coba USER:PASS@HOST:PORT (format paling umum)
+        match_user_pass_host_port = re.match(rf"^(?P<user_pass>.+)@(?P<host>{host_pattern}):(?P<port>{port_pattern})$", p)
+        if match_user_pass_host_port:
+            user_pass = match_user_pass_host_port.group("user_pass")
+            host = match_user_pass_host_port.group("host")
+            port_str = match_user_pass_host_port.group("port")
+            if port_str.isdigit() and 1 <= int(port_str) <= 65535:
+                converted = f"http://{user_pass}@{host}:{port_str}"
+            else:
+                malformed_count += 1; logger.debug(f"Skipping invalid port in USER:PASS@HOST:PORT: {p}")
+
+        # B. Coba HOST:PORT:USER:PASS (format alternatif)
+        elif not converted and p.count(':') == 3 and '@' not in p:
+            parts = p.split(':')
+            host, port_str, user, password = parts
+            if re.match(rf"^{host_pattern}$", host) and port_str.isdigit() and 1 <= int(port_str) <= 65535:
+                 converted = f"http://{user}:{password}@{host}:{port_str}"
+            else:
+                 malformed_count += 1; logger.debug(f"Skipping invalid host/port in HOST:PORT:USER:PASS: {p}")
+
+        # C. Coba HOST:PORT (tanpa auth)
+        elif not converted and p.count(':') == 1 and '@' not in p:
+            parts = p.split(':')
+            host, port_str = parts
+            if re.match(rf"^{host_pattern}$", host) and port_str.isdigit() and 1 <= int(port_str) <= 65535:
+                converted = f"http://{host}:{port_str}"
+            else:
+                 malformed_count += 1; logger.debug(f"Skipping invalid host/port in HOST:PORT: {p}")
+
+        # D. Jika ada '@' tapi tidak cocok format A (mungkin HOST:PORT@USER:PASS?)
+        elif not converted and '@' in p and p.count(':') == 2:
              try:
                  host_part, user_part = p.split('@', 1)
-                 ip, port = host_part.split(':', 1)
-                 user, password = user_part.split(':', 1)
-                 # Validasi sederhana IP dan Port
-                 if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip) and port.isdigit() and 1 <= int(port) <= 65535:
-                     converted_proxies.append(f"http://{user}:{password}@{ip}:{port}")
+                 host, port_str = host_part.split(':', 1)
+                 user, password = user_part.split(':', 1) # Asumsi format user:pass
+                 if re.match(rf"^{host_pattern}$", host) and port_str.isdigit() and 1 <= int(port_str) <= 65535:
+                     converted = f"http://{user}:{password}@{host}:{port_str}"
                  else:
-                     malformed_count += 1
-                     logger.debug(f"Skipping invalid IP/Port in IP:PORT@USER:PASS format: {p}")
-                 continue
+                     malformed_count += 1; logger.debug(f"Skipping invalid host/port in HOST:PORT@USER:PASS: {p}")
              except ValueError:
-                 malformed_count += 1
-                 logger.debug(f"Skipping malformed proxy (expected IP:PORT@USER:PASS): {p}")
-                 continue
+                 malformed_count += 1; logger.debug(f"Skipping malformed proxy (expected HOST:PORT@USER:PASS): {p}")
 
-        # Cek format IP:PORT (tanpa auth)
-        elif ':' in p and '@' not in p and p.count(':') == 1:
-            try:
-                ip, port = p.split(':', 1)
-                if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip) and port.isdigit() and 1 <= int(port) <= 65535:
-                    converted_proxies.append(f"http://{ip}:{port}")
-                else:
-                    malformed_count += 1
-                    logger.debug(f"Skipping invalid IP/Port in IP:PORT format: {p}")
-                continue
-            except ValueError:
-                 malformed_count += 1
-                 logger.debug(f"Skipping malformed proxy (expected IP:PORT): {p}")
-                 continue
 
-        # Cek format USER:PASS@IP:PORT (format standar)
-        elif '@' in p and p.count(':') == 3:
-             try:
-                 auth_part, host_part = p.split('@', 1)
-                 user, password = auth_part.split(':', 1)
-                 ip, port = host_part.split(':', 1)
-                 if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip) and port.isdigit() and 1 <= int(port) <= 65535:
-                     converted_proxies.append(f"http://{user}:{password}@{ip}:{port}")
-                 else:
-                      malformed_count += 1
-                      logger.debug(f"Skipping invalid IP/Port in USER:PASS@IP:PORT format: {p}")
-                 continue
-             except ValueError:
-                 malformed_count += 1
-                 logger.debug(f"Skipping malformed proxy (expected USER:PASS@IP:PORT): {p}")
-                 continue
+        # Jika berhasil dikonversi
+        if converted:
+            converted_proxies.append(converted)
+        elif not match_user_pass_host_port and ':' not in p and '@' not in p: # Handle jika cuma IP/Host tanpa port
+             malformed_count += 1
+             logger.debug(f"Skipping entry without port: {p}")
+        elif converted is None: # Jika sudah dicoba semua tapi gagal
+             malformed_count += 1
+             # logger.warning(f"Unrecognized proxy format skipped: {p}") # Kurangi noise
 
-        # Jika tidak cocok semua
-        else:
-            malformed_count += 1
-            # logger.warning(f"Unrecognized proxy format skipped: {p}") # Kurangi noise log
-
-        if processed_count % 1000 == 0: # Log progress konversi
-            logger.info(f"Converted {processed_count}/{total_raw} lines...")
+        if processed_count % 1000 == 0: logger.info(f"Conversion progress: {processed_count}/{total_raw} lines...")
 
 
     if malformed_count > 0:
@@ -221,23 +232,19 @@ def convert_proxylist_to_http(input_file, output_file):
 
     if not converted_proxies:
         logger.error("No valid proxies could be converted to http format.")
-        # Hapus file input jika kosong setelah gagal konversi
         try: os.remove(input_file); logger.info(f"Removed empty/failed input file '{input_file}'.")
         except OSError as e: logger.warning(f"Could not remove temporary file '{input_file}': {e}")
         return False
 
     try:
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
-        # Hapus duplikat SEBELUM menulis ke file output
         unique_converted = sorted(list(set(converted_proxies)))
         duplicates_removed = len(converted_proxies) - len(unique_converted)
-        if duplicates_removed > 0:
-             logger.info(f"Removed {duplicates_removed} duplicates during conversion.")
+        if duplicates_removed > 0: logger.info(f"Removed {duplicates_removed} duplicates during conversion.")
 
-        with open(output_file, "w", encoding='utf-8') as f: # Tambah encoding
+        with open(output_file, "w", encoding='utf-8') as f:
             for proxy in unique_converted: f.write(proxy + "\n")
         logger.info(f"Successfully converted and saved {len(unique_converted)} unique proxies to '{output_file}'.")
-        # Hapus file input setelah konversi sukses
         try: os.remove(input_file); logger.info(f"Removed temporary input file '{input_file}'.")
         except OSError as e: logger.warning(f"Could not remove temporary file '{input_file}': {e}")
         return True
@@ -251,8 +258,9 @@ def load_and_deduplicate_proxies(file_path):
         logger.warning(f"File not found for deduplication: {file_path}")
         return []
     try:
-        with open(file_path, "r", encoding='utf-8', errors='ignore') as f: # Tambah encoding
-            proxies = [line.strip() for line in f if line.strip()]
+        # Baca dengan ignore error encoding
+        with open(file_path, "r", encoding='utf-8', errors='ignore') as f:
+            proxies = [line.strip() for line in f if line.strip() and not line.startswith("#")]
     except IOError as e:
         logger.error(f"Failed to read {file_path} for deduplication: {e}")
         return []
@@ -262,52 +270,58 @@ def load_and_deduplicate_proxies(file_path):
     if removed_count > 0:
         logger.info(f"Removed {removed_count} duplicate proxies from '{os.path.basename(file_path)}'.")
         try:
-            with open(file_path, "w", encoding='utf-8') as f: # Tambah encoding
+            with open(file_path, "w", encoding='utf-8') as f:
                 for proxy in unique_proxies: f.write(proxy + "\n")
             logger.info(f"Overwrote '{os.path.basename(file_path)}' with {len(unique_proxies)} unique proxies.")
         except IOError as e:
             logger.error(f"Failed to overwrite {file_path} after deduplication: {e}")
-            # Jika gagal nulis ulang, kembalikan list unik yg sudah di memori
-            return unique_proxies
+            return unique_proxies # Kembalikan list unik jika gagal nulis
+    # Jika tidak ada duplikat, tidak perlu overwrite
+    elif len(proxies) > 0:
+         logger.info(f"No duplicates found in '{os.path.basename(file_path)}' ({len(proxies)} unique).")
+
     return unique_proxies
 
 def check_proxy_final(proxy):
-    """Tes koneksi proxy ke CHECK_URLS."""
+    """Tes koneksi proxy ke CHECK_URLS (versi sederhana tanpa GitHub token)."""
     proxies_dict = {"http": proxy, "https": proxy}
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'} # User agent lebih umum
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     for url in CHECK_URLS:
         try:
-            # Gunakan session untuk potensi re-use koneksi (minor optimization)
             with requests.Session() as session:
                  session.proxies = proxies_dict
                  session.headers.update(headers)
-                 response = session.get(url, timeout=PROXY_TIMEOUT) # Timeout per URL check
+                 # Timeout per URL check
+                 response = session.get(url, timeout=PROXY_TIMEOUT)
 
-            # response = requests.get(url, proxies=proxies_dict, timeout=PROXY_TIMEOUT, headers=headers)
             response.raise_for_status() # Cek status 2xx
-            # Cek kasar apakah isinya IP address (lebih toleran)
             content = response.text.strip()
-            if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', content) or ':' in content:
+            # Cek kasar apakah isinya IP address
+            if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', content):
                 # logger.debug(f"Proxy {proxy.split('@')[-1]} OK via {url}")
                 return proxy, True, f"OK via {url}" # Berhasil
             else:
                 logger.debug(f"Proxy {proxy.split('@')[-1]} returned unexpected content from {url}: {content[:60]}...")
-                # Jangan langsung continue, mungkin URL kedua berhasil
+                # Coba URL berikutnya jika ada
+
         except requests.exceptions.HTTPError as e:
              if e.response.status_code == 407:
                  logger.debug(f"Proxy {proxy.split('@')[-1]} requires auth (407) on {url}")
                  return proxy, False, "Authentication Required (407)" # Gagal permanen
              else:
-                 # Error HTTP lain, log dan coba URL lain
                  logger.debug(f"HTTP Error for {proxy.split('@')[-1]} on {url}: {e.response.status_code}")
-                 # Jangan continue, biarkan loop coba URL lain
+                 # Coba URL berikutnya
         except requests.exceptions.Timeout:
              logger.debug(f"Timeout for {proxy.split('@')[-1]} on {url}")
-             # Jangan continue, biarkan loop coba URL lain
+             # Coba URL berikutnya
+        except requests.exceptions.ProxyError as e:
+             reason = str(e).split(':')[-1].strip() # Ambil reason error
+             logger.debug(f"Proxy Error for {proxy.split('@')[-1]} on {url}: {reason[:40]}")
+             # Anggap gagal permanen untuk proxy error
+             return proxy, False, f"Proxy Error ({reason[:30]})"
         except requests.exceptions.RequestException as e:
-             # Error koneksi lain, log dan coba URL lain
              logger.debug(f"Connection Error for {proxy.split('@')[-1]} on {url}: {e.__class__.__name__}")
-             # Jangan continue, biarkan loop coba URL lain
+             # Coba URL berikutnya
 
     # Jika loop selesai tanpa return True
     logger.debug(f"Proxy {proxy.split('@')[-1]} failed all check URLs.")
@@ -325,13 +339,10 @@ def run_proxy_test(proxies_to_test):
     tested_count = 0
     total_proxies = len(proxies_to_test)
 
-    # Wrap ThreadPoolExecutor in try...finally for proper shutdown
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     try:
         future_to_proxy = {executor.submit(check_proxy_final, p): p for p in proxies_to_test}
-
-        # Log progress lebih sering
-        log_interval = max(1, total_proxies // 20) # Log sekitar 20 kali
+        log_interval = max(1, total_proxies // 20) # Log progress ~20 kali
 
         for future in as_completed(future_to_proxy):
             try:
@@ -342,25 +353,23 @@ def run_proxy_test(proxies_to_test):
                 else:
                     failed_proxies_details.append((proxy, message))
 
-                # Log progress
                 if tested_count % log_interval == 0 or tested_count == total_proxies:
                      progress_percent = (tested_count / total_proxies) * 100
                      logger.info(f"Proxy Test Progress: {tested_count}/{total_proxies} ({progress_percent:.1f}%) - Found {len(good_proxies)} good.")
 
-            except Exception as exc: # Tangkap error dari future.result()
-                proxy_key = future_to_proxy[future] # Dapatkan proxy yg error
+            except Exception as exc:
+                proxy_key = future_to_proxy[future]
                 logger.error(f"Error processing proxy {proxy_key.split('@')[-1]}: {exc}")
                 failed_proxies_details.append((proxy_key, f"Task Error: {exc}"))
                 tested_count += 1 # Pastikan count tetap naik
-
     finally:
-         executor.shutdown(wait=True) # Pastikan semua thread selesai
+         executor.shutdown(wait=True)
 
     # Simpan proxy gagal
     if failed_proxies_details:
         try:
             os.makedirs(os.path.dirname(FAIL_PROXY_FILE), exist_ok=True)
-            with open(FAIL_PROXY_FILE, "w", encoding='utf-8') as f: # Tambah encoding
+            with open(FAIL_PROXY_FILE, "w", encoding='utf-8') as f:
                 for p, reason in failed_proxies_details:
                     f.write(f"{p} # {reason}\n")
             logger.info(f"Saved {len(failed_proxies_details)} failed proxies/errors to '{FAIL_PROXY_FILE}'.")
@@ -371,25 +380,28 @@ def run_proxy_test(proxies_to_test):
     return good_proxies
 
 def sync_proxies():
-    """Fungsi utama untuk menjalankan seluruh proses sync."""
+    """Fungsi utama untuk menjalankan seluruh proses sync. Returns True/False."""
     start_time = time.time()
     logger.info("===== Starting Proxy Sync Process =====")
 
-    # 1. Download dari API
+    # 1. Download dari API -> data/proxylist_downloaded.txt
     logger.info("--- Step 1: Downloading Proxies ---")
     downloaded = download_proxies_from_apis()
-    # Jika download menghasilkan list kosong atau gagal total, downloaded akan []
-    if not downloaded:
-        logger.warning("No proxies downloaded from APIs. Will proceed using existing 'proxy.txt' if available.")
-        # Lanjut ke langkah 3 (backup & load proxy.txt)
-    else:
-        # 2. Konversi hasil download ke proxy.txt (akan menghapus proxylist_downloaded.txt)
+    # 'downloaded' is the list of lines, could be empty.
+
+    # 2. Konversi hasil download (jika ada) ke data/proxy.txt
+    #    Jika download gagal/kosong, langkah ini akan skip atau gagal,
+    #    dan kita akan lanjut menggunakan proxy.txt yang sudah ada.
+    if downloaded: # Hanya konversi jika ada hasil download
         logger.info("--- Step 2: Converting Downloaded Proxies ---")
         if not convert_proxylist_to_http(PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE):
              logger.error("Failed during proxy format conversion. Aborting sync.")
              return False # Gagal
+    else:
+        logger.warning("No proxies downloaded from APIs. Will proceed using existing 'proxy.txt' if available.")
+        # Lanjut ke langkah 3 (backup & load proxy.txt yang ada)
 
-    # 3. Backup proxy.txt yang sekarang (hasil konversi atau yg sudah ada)
+    # 3. Backup data/proxy.txt yang sekarang -> history/proxy_backup.txt
     logger.info("--- Step 3: Backing Up Current Proxy List ---")
     try:
         if os.path.exists(PROXY_SOURCE_FILE):
@@ -397,11 +409,11 @@ def sync_proxies():
             shutil.copy(PROXY_SOURCE_FILE, PROXY_BACKUP_FILE)
             logger.info(f"Created backup: '{PROXY_BACKUP_FILE}'")
         else:
-            logger.info("No 'proxy.txt' found to back up.")
+            logger.info("No 'proxy.txt' found to back up (perhaps first run or download failed?).")
     except Exception as e:
         logger.warning(f"Failed to create proxy backup: {e}")
 
-    # 4. Load proxy.txt, Deduplikasi, dan Overwrite
+    # 4. Load data/proxy.txt, Deduplikasi, dan Overwrite file itu sendiri
     logger.info("--- Step 4: Loading and Deduplicating Proxies ---")
     proxies_to_test = load_and_deduplicate_proxies(PROXY_SOURCE_FILE)
     if not proxies_to_test:
@@ -412,17 +424,16 @@ def sync_proxies():
     logger.info("--- Step 5: Testing Proxies ---")
     good_proxies = run_proxy_test(proxies_to_test)
 
-    # 6. Overwrite proxy.txt HANYA dengan proxy yang bagus
-    logger.info("--- Step 6: Updating Proxy List ---")
+    # 6. Overwrite data/proxy.txt HANYA dengan proxy yang bagus
+    logger.info("--- Step 6: Updating Final Proxy List ---")
     if not good_proxies:
         logger.error("No working proxies found after testing. 'proxy.txt' will NOT be updated to prevent emptying the list.")
-        logger.error("Check 'fail_proxy.txt' for failure details.")
+        logger.error("Check 'history/fail_proxy.txt' for failure details.")
         result = False # Gagal
     else:
         try:
-            # Acak urutan proxy bagus sebelum disimpan
-            random.shuffle(good_proxies)
-            with open(PROXY_SOURCE_FILE, "w", encoding='utf-8') as f: # Tambah encoding
+            random.shuffle(good_proxies) # Acak urutan
+            with open(PROXY_SOURCE_FILE, "w", encoding='utf-8') as f:
                 for proxy in good_proxies:
                     f.write(proxy + "\n")
             logger.info(f"Successfully overwrote '{PROXY_SOURCE_FILE}' with {len(good_proxies)} tested working proxies.")
@@ -433,5 +444,26 @@ def sync_proxies():
 
     end_time = time.time()
     duration = end_time - start_time
-    logger.info(f"===== Proxy Sync Process Finished in {duration:.2f} seconds =====")
+    logger.info(f"===== Proxy Sync Process Finished in {duration:.2f} seconds (Success: {result}) =====")
     return result
+
+# Jika file ini dijalankan langsung (untuk testing)
+if __name__ == "__main__":
+    print("Running proxy sync module directly for testing...")
+    # Setup basic logging ke console untuk testing
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Pastikan file dummy ada
+    if not os.path.exists(APILIST_SOURCE_FILE):
+        print(f"Creating dummy {APILIST_SOURCE_FILE}...")
+        os.makedirs(os.path.dirname(APILIST_SOURCE_FILE), exist_ok=True)
+        with open(APILIST_SOURCE_FILE, "w") as f:
+            f.write("https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all\n")
+            f.write("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt\n")
+            f.write("https://raw.githubusercontent.com/zevtyardt/proxy-list/main/http.txt\n")
+
+
+    success = sync_proxies()
+    print(f"Sync process completed. Success: {success}")
+    if success:
+        print(f"Check '{PROXY_SOURCE_FILE}' for results.")
+        print(f"Check '{FAIL_PROXY_FILE}' for failures.")
