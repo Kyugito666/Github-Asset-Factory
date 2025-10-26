@@ -48,7 +48,8 @@ ALL_PERSONAS = [
 # ============================================================
 # COMMAND HANDLERS
 # ============================================================
-
+from ..services.llm.caller import _provider_cooldown, _model_cooldown, COOLDOWN_DURATION
+import time
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk /start command."""
     user = update.effective_user
@@ -88,6 +89,45 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message += f"**AI Fallback System:**\n• Total Model Options: `{num_options}`\n\n"
     else:
         message += "**AI Fallback System:**\n• `Error: No models loaded!`\n\n"
+
+    # Cooldown Stats (NEW)
+    current_time = time.time()
+    active_provider_cooldowns = 0
+    active_model_cooldowns = 0
+    
+    for provider, timestamp in _provider_cooldown.items():
+        remaining = COOLDOWN_DURATION - (current_time - timestamp)
+        if remaining > 0:
+            active_provider_cooldowns += 1
+    
+    for model_key, timestamp in _model_cooldown.items():
+        remaining = COOLDOWN_DURATION - (current_time - timestamp)
+        if remaining > 0:
+            active_model_cooldowns += 1
+    
+    if active_provider_cooldowns > 0 or active_model_cooldowns > 0:
+        message += (f"**AI Cooldowns (1h):**\n"
+                    f"• Provider Cooldowns: `{active_provider_cooldowns}`\n"
+                    f"• Model Cooldowns: `{active_model_cooldowns}`\n\n")
+
+    # Proxy Stats
+    if PROXY_POOL and PROXY_POOL.proxies:
+        active_proxies = len(PROXY_POOL.proxies)
+        failed_now = len(PROXY_POOL.failed_proxies)
+        message += (f"**Proxy Pool:**\n"
+                    f"• Total Loaded: `{active_proxies}`\n"
+                    f"• Currently Cooldown: `{failed_now}`\n\n")
+    else:
+        message += "**Proxy Pool:** `Inactive (No proxies loaded)`\n\n"
+
+    # Gmail Stats
+    stats_gmail = get_stats()
+    message += (f"**Gmail Dot Trick:**\n"
+                f"• Emails in `data/gmail.txt`: `{stats_gmail['total_emails_in_file']}`\n"
+                f"• Emails in History: `{stats_gmail['emails_with_variations']}`\n"
+                f"• Total Variations Generated: `{stats_gmail['total_variations_generated']}`")
+
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
 
     # Proxy Stats
     if PROXY_POOL and PROXY_POOL.proxies:
