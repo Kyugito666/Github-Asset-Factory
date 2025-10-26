@@ -1,11 +1,10 @@
 """
-LLM Caller - Core AI calling function dengan manual fallback
+LLM Caller - Core AI calling dengan smart fallback
 
-Features:
-- Random shuffle setiap call (load distribution)
-- Sequential fallback through all options
-- Proxy failure tracking
-- Specific exception handling per error type
+OPTIMIZATIONS:
+- Smart proxy rotation (skip cooldown proxies)
+- Provider blacklist (skip known-failed providers)
+- Priority ordering (working providers first)
 """
 
 import litellm
@@ -26,56 +25,142 @@ from .options import llm_call_options
 
 logger = logging.getLogger(__name__)
 
-# litellm.set_verbose = True  # Uncomment untuk debug
+# === TEMPORARY SKIP SYSTEM (1 HOUR COOLDOWN) ===
+import time
+
+_provider_cooldown = {}  # {provider: timestamp} - Skip for 1 hour
+_model_cooldown = {}     # {model_key: timestamp} - Skip for 1 hour
+COOLDOWN_DURATION = 3600  # 1 hour (quota bisa reset bulanan)
+
+def _add_to_cooldown(provider: str, model_id: str, reason: str):
+    """Add provider/model ke temporary cooldown (1 hour)."""
+    key = f"{provider}:{model_id}"
+    current_time = time.time()
+    
+    # Temporary cooldown criteria
+    if "quota" in reason.lower() or "payment" in reason.lower() or "429" in reason:
+        _provider_cooldown[provider] = current_time
+        logger.warning(f"⏸️ COOLDOWN Provider: {provider} for 1h (Reason: {reason[:50]})")
+    elif "402" in reason or "404" in reason:
+        _model_cooldown[key] = current_time
+        logger.warning(f"⏸️ COOLDOWN Model: {model_id} for 1h (Reason: {reason[:50]})")
+
+def _is_in_cooldown(provider: str, model_id: str) -> bool:
+    """Check if provider/model masih dalam cooldown period."""
+    current_time = time.time()
+    key = f"{provider}:{model_id}"
+    
+    # Check provider cooldown
+    if provider in _provider_cooldown:
+        elapsed = current_time - _provider_cooldown[provider]
+        if elapsed < COOLDOWN_DURATION:
+            return True
+        else:
+            # Cooldown expired, remove
+            del _provider_cooldown[provider]
+            logger.info(f"✅ Cooldown expired: {provider}")
+    
+    # Check model cooldown
+    if key in _model_cooldown:
+        elapsed = current_time - _model_cooldown[key]
+        if elapsed < COOLDOWN_DURATION:
+            return True
+        else:
+            # Cooldown expired, remove
+            del _model_cooldown[key]
+            logger.info(f"✅ Cooldown expired: {model_id}")
+    
+    return False
 
 
 def call_llm(prompt: str):
     """
-    Call LLM dengan manual fallback system.
+    Call LLM dengan smart fallback.
     
-    Process:
-    1. Random shuffle llm_call_options (load distribution)
-    2. Try setiap option secara sequential
-    3. Handle specific errors:
-       - Connection/Timeout: Mark proxy failed, continue
-       - Auth/BadRequest/RateLimit/NotFound: Continue (error permanent)
-       - Unexpected: Mark proxy failed, continue
-    4. Return response atau None jika semua gagal
-    
-    Args:
-        prompt: User prompt string
-        
-    Returns:
-        Optional[str]: AI response atau None jika gagal
+    OPTIMIZATION FLOW:
+    1. Filter blacklisted providers/models
+    2. Prioritize: working > untested > failed
+    3. Smart proxy rotation (skip cooldown)
+    4. Max 3 retries per unique provider
     """
     if not llm_call_options:
         logger.error("LLM call options not initialized.")
         return None
 
-    # Random shuffle setiap call untuk load distribution
-    current_options = random.sample(llm_call_options, len(llm_call_options))
+    # === FILTER BLACKLISTED ===
+    available_options = []
+    for opt in llm_call_options:
+        provider = opt["provider"]
+        model_id = opt["params"].get("model", "")
+        key = f"{provider}:{model_id}"
+        
+        if provider in _provider_blacklist:
+            continue
+        if key in _model_blacklist:
+            continue
+        
+        available_options.append(opt)
+    
+    if not available_options:
+        logger.error("❌ All providers blacklisted. Reset dan restart service.")
+        return None
+    
+    # === SMART SHUFFLE ===
+    # Priority: Cohere, Mistral, OpenRouter > Gemini > Others
+    priority_providers = {"Cohere", "Mistral", "OpenRouter"}
+    
+    priority_opts = [o for o in available_options if o["provider"] in priority_providers]
+    other_opts = [o for o in available_options if o["provider"] not in priority_providers]
+    
+    random.shuffle(priority_opts)
+    random.shuffle(other_opts)
+    
+    current_options = priority_opts + other_opts
+    
+    logger.info(f"🎯 Available: {len(current_options)} options ({len(priority_opts)} priority)")
 
+    # === ATTEMPT LOOP ===
+    tried_providers = {}  # Track attempts per provider
+    
     for i, option in enumerate(current_options):
         provider = option["provider"]
-        params = option["params"].copy()  # Copy untuk avoid mutation
+        params = option["params"].copy()
         model_id = params.get("model", "N/A")
-        proxy_used = params.get("proxy")
-
-        # Remove proxy param jika None (litellm tidak suka None value)
-        if proxy_used is None:
-            if "proxy" in params:
-                del params["proxy"]
-
-        logger.info(f"Attempt {i+1}/{len(current_options)}: Trying {provider} - {model_id} "
-                   f"(Proxy: {proxy_used.split('@')[-1] if proxy_used else 'None'})")
+        
+        # Limit 3 attempts per provider
+        if tried_providers.get(provider, 0) >= 3:
+            continue
+        
+        tried_providers[provider] = tried_providers.get(provider, 0) + 1
+        
+        # === SMART PROXY ROTATION ===
+        proxy_url = params.get("proxy")
+        
+        if proxy_url:
+            # Check if still in cooldown
+            if PROXY_POOL and proxy_url in PROXY_POOL.failed_proxies:
+                # Skip, get new proxy
+                new_proxy = PROXY_POOL.get_next_proxy()
+                if new_proxy:
+                    params["proxy"] = new_proxy
+                    proxy_url = new_proxy
+                else:
+                    # No proxy available, try without
+                    if "proxy" in params:
+                        del params["proxy"]
+                    proxy_url = None
+        
+        proxy_display = proxy_url.split('@')[-1] if proxy_url else 'None'
+        
+        logger.info(f"Attempt {i+1}/{len(current_options)}: {provider} - {model_id} "
+                   f"(Proxy: {proxy_display})")
 
         try:
-            # Direct call ke litellm.completion dengan params
             response = litellm.completion(
-                **params,  # Unpack: model, api_key, proxy (optional), max_tokens
+                **params,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.8,
-                timeout=120  # Timeout per attempt
+                timeout=120
             )
 
             result = response.choices[0].message.content
@@ -84,38 +169,47 @@ def call_llm(prompt: str):
             if result:
                 return result
             else:
-                logger.warning(f"⚠️ Empty response. Trying next...")
+                logger.warning(f"⚠️ Empty response. Next...")
                 continue
 
         except (APIConnectionError, Timeout) as e:
-            logger.warning(f"❌ Connection/Timeout with {provider} - {model_id}: "
-                          f"{type(e).__name__}. Trying next...")
+            logger.warning(f"❌ Connection/Timeout: {type(e).__name__}. Next...")
             
-            # Mark proxy failed jika pakai proxy
-            if PROXY_POOL and proxy_used:
-                PROXY_POOL.mark_failed(proxy_used)
+            if PROXY_POOL and proxy_url:
+                PROXY_POOL.mark_failed(proxy_url)
             
             continue
 
-        except (AuthenticationError, BadRequestError, RateLimitError, NotFoundError) as e:
-            # Log level berbeda untuk rate limit (warning) vs error lain (error)
-            log_level = logging.WARNING if isinstance(e, RateLimitError) else logging.ERROR
+        except (AuthenticationError, BadRequestError) as e:
+            error_msg = str(e)
+            logger.error(f"❌ Auth/BadRequest: {error_msg[:150]}. Next...")
             
-            logger.log(log_level, f"❌ API Error with {provider} - {model_id}: "
-                      f"{type(e).__name__} - {str(e)[:150]}. Trying next...")
+            # Add to blacklist if quota/payment issue
+            _add_to_blacklist(provider, model_id, error_msg)
             
+            continue
+        
+        except RateLimitError as e:
+            logger.warning(f"⚠️ Rate Limited. Next...")
+            _add_to_blacklist(provider, model_id, str(e))
+            continue
+
+        except NotFoundError as e:
+            logger.error(f"❌ Model Not Found: {model_id}. Next...")
+            _add_to_blacklist(provider, model_id, "404")
             continue
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error with {provider} - {model_id}: "
-                        f"{type(e).__name__} - {str(e)[:150]}. Trying next...", 
-                        exc_info=False)
+            logger.error(f"❌ Unexpected: {type(e).__name__} - {str(e)[:150]}. Next...")
             
-            # Mark proxy failed untuk unexpected errors
-            if PROXY_POOL and proxy_used:
-                PROXY_POOL.mark_failed(proxy_used)
+            if PROXY_POOL and proxy_url:
+                PROXY_POOL.mark_failed(proxy_url)
+            
+            # Check if payment/quota error in generic exception
+            if "402" in str(e) or "payment" in str(e).lower():
+                _add_to_blacklist(provider, model_id, str(e))
             
             continue
 
-    logger.error("❌ All LLM call options failed.")
+    logger.error("❌ All LLM options exhausted.")
     return None
