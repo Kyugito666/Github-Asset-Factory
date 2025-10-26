@@ -34,7 +34,7 @@ WEBSHARE_AUTH_URL = "https://proxy.webshare.io/api/v2/proxy/ipauthorization/"
 WEBSHARE_SUB_URL = "https://proxy.webshare.io/api/v2/subscription/"
 WEBSHARE_CONFIG_URL = "https://proxy.webshare.io/api/v2/proxy/config/"
 WEBSHARE_PROFILE_URL = "https://proxy.webshare.io/api/v2/profile/"
-WEBSHARE_DOWNLOAD_URL_FORMAT = "https://proxy.webshare.io/api/v2/proxy/list/download/{token}/-/any/{username}/direct/-/?plan_id={plan_id}"
+WEBSHARE_DOWNLOAD_URL_FORMAT = "https://proxy.webshare.io/api/v2/proxy/list/download/{token}/-/any/username/direct/-/"
 IP_CHECK_SERVICE_URL = "https://api.ipify.org?format=json"
 WEBSHARE_API_TIMEOUT = 60
 
