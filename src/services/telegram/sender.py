@@ -49,6 +49,7 @@ def send_text_message(message: str, chat_id: str = None) -> bool:
     }
     
     max_retries = 3
+    markdown_failed = False
 
     for attempt in range(1, max_retries + 1):
         proxies, proxy_url_display = None, "None"
@@ -70,11 +71,16 @@ def send_text_message(message: str, chat_id: str = None) -> bool:
             logger.error(f"HTTP Error sending text (Attempt {attempt}, Proxy: {proxy_url_display}): "
                         f"{e.response.status_code} - {e.response.text[:200]}")
             
-            # Handle specific errors
+            # Handle Markdown parse error
             if e.response.status_code == 400 and 'parse' in e.response.text.lower():
-                logger.warning("Markdown parse error, retrying without Markdown...")
-                payload['parse_mode'] = None
-                continue
+                if not markdown_failed:
+                    logger.warning("Markdown parse error, switching to plain text...")
+                    payload['parse_mode'] = None
+                    markdown_failed = True
+                    # Retry immediately dengan parse_mode=None
+                    continue
+            
+            # Handle rate limiting
             elif e.response.status_code == 429:
                 logger.warning(f"Rate limited by Telegram. Waiting before retry...")
                 time.sleep(5 * attempt)
