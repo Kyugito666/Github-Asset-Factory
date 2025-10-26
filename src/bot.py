@@ -63,25 +63,11 @@ async def scheduled_proxy_sync_task():
         duration = time.time() - start_time
         logger.error(f"Error scheduled proxy sync ({duration:.2f}s): {e}", exc_info=True)
 
-# UPDATE src/bot.py - Tambahkan fungsi full auto sync
-
-# TAMBAHKAN FUNGSI INI setelah scheduled_proxy_sync_task (sekitar line 48):
-
 async def full_webshare_auto_sync():
-    """
-    Full automation:
-    1. Sync IP authorization ke semua Webshare accounts
-    2. Download proxy list dari semua accounts
-    3. Convert ke format http://user:pass@host:port
-    4. Test semua proxy (concurrent)
-    5. Save yang working ke proxy.txt
-    6. Reload proxy pool
-    """
     start_time = time.time()
     logger.info("===== Starting FULL Webshare Auto Sync =====")
     
     try:
-        # STEP 1: IP Authorization Sync (jika enabled)
         if ENABLE_WEBSHARE_IP_SYNC:
             logger.info("Step 1: Syncing IP authorization to all Webshare accounts...")
             ip_sync_success = await asyncio.to_thread(run_webshare_ip_sync)
@@ -92,7 +78,6 @@ async def full_webshare_auto_sync():
         else:
             logger.info("Step 1: IP sync disabled, skipping...")
         
-        # STEP 2-6: Full Proxy Sync (download, convert, test, save, reload)
         logger.info("Step 2-6: Running full proxy sync (download, convert, test, save)...")
         proxy_sync_success = await asyncio.to_thread(sync_proxies)
         
@@ -111,112 +96,6 @@ async def full_webshare_auto_sync():
         duration = time.time() - start_time
         logger.error(f"===== Full Webshare Auto Sync ERROR ({duration:.1f}s): {e} =====", exc_info=True)
         return False
-
-
-# GANTI fungsi setup_bot_commands (sekitar line 469) dengan ini:
-
-async def setup_bot_commands(app: Application):
-    """Set bot commands AND start the scheduler with FULL automation."""
-    commands = [
-        BotCommand("start", "Mulai bot & tampilkan menu"),
-        BotCommand("info", "Informasi tentang bot"),
-        BotCommand("stats", "Lihat statistik bot"),
-        BotCommand("sync_proxies", "Update daftar proxy (Download, Test, Update)"),
-        BotCommand("sync_ip", "Update otorisasi IP di Webshare (jika aktif)"),
-        BotCommand("full_sync", "Full Auto Sync (IP Auth + Proxy Download)")  # COMMAND BARU
-    ]
-    if not ENABLE_WEBSHARE_IP_SYNC:
-        commands = [cmd for cmd in commands if cmd.command != "sync_ip"]
-        logger.info("Command /sync_ip disabled because ENABLE_WEBSHARE_IP_SYNC is false.")
-
-    try:
-        await app.bot.set_my_commands(commands)
-        logger.info("Bot commands updated successfully.")
-    except Exception as e:
-        logger.error(f"Failed to set bot commands: {e}")
-
-    logger.info("Initializing background scheduler with FULL automation...")
-    try:
-        if not scheduler.running:
-            # Job untuk FULL AUTO SYNC (IP Auth + Proxy Download) - WEEKLY
-            scheduler.add_job(
-                full_webshare_auto_sync,
-                trigger=IntervalTrigger(weeks=1),
-                id="weekly_full_sync",
-                name="Weekly Full Webshare Auto Sync",
-                next_run_time=datetime.now() + timedelta(seconds=30)  # Run 30 detik setelah start
-            )
-            scheduler.start()
-            logger.info("✅ Background scheduler started with WEEKLY FULL AUTO SYNC job.")
-            logger.info("   → First run in 30 seconds, then weekly")
-        else:
-            logger.info("Scheduler already running.")
-    except Exception as e:
-        logger.error(f"❌ Failed to start scheduler: {e}", exc_info=True)
-
-
-# TAMBAHKAN HANDLER untuk /full_sync command (setelah sync_webshare_ip_handler, sekitar line 444):
-
-async def full_sync_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk command /full_sync - Manual trigger full automation."""
-    chat_id = str(update.message.chat_id)
-    await update.message.reply_text(
-        "⏳ Memulai **FULL AUTO SYNC**...\n\n"
-        "1️⃣ IP Authorization\n"
-        "2️⃣ Proxy Download\n"
-        "3️⃣ Format Conversion\n"
-        "4️⃣ Proxy Testing\n"
-        "5️⃣ Save & Reload Pool\n\n"
-        "_Proses mungkin memakan waktu 1-3 menit..._",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    logger.info(f"Manual full sync requested by chat_id {chat_id}.")
-    context.application.create_task(run_full_sync_task(chat_id))
-
-
-async def run_full_sync_task(chat_id: str):
-    """Task async untuk full sync manual & notifikasi ke user."""
-    start_time = time.time()
-    message_prefix = f"Manual Full Sync (Chat ID: {chat_id}): "
-    try:
-        logger.info(message_prefix + "Running full_webshare_auto_sync...")
-        success = await full_webshare_auto_sync()
-        duration = time.time() - start_time
-        
-        if success:
-            logger.info(message_prefix + f"OK ({duration:.2f}s).")
-            # Ambil info proxy pool untuk notifikasi
-            from .config import PROXY_POOL
-            proxy_count = len(PROXY_POOL.proxies) if PROXY_POOL and PROXY_POOL.proxies else 0
-            
-            message = (f"✅ **FULL AUTO SYNC Berhasil!**\n\n"
-                      f"⏱ Durasi: `{duration:.1f}s`\n"
-                      f"📊 Working Proxies: `{proxy_count}`\n"
-                      f"🔄 Pool Status: `Active`\n\n"
-                      f"_Sistem siap digunakan dengan proxy baru._")
-            await asyncio.to_thread(send_text_message, message, chat_id)
-        else:
-            logger.error(message_prefix + f"FAILED ({duration:.2f}s).")
-            message = (f"⚠️ **FULL AUTO SYNC Gagal**\n\n"
-                      f"⏱ Durasi: `{duration:.1f}s`\n\n"
-                      f"❌ Cek log server untuk detail error.\n"
-                      f"_Bot mungkin masih bisa jalan dengan proxy lama (jika ada)._")
-            await asyncio.to_thread(send_text_message, message, chat_id)
-            
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.error(message_prefix + f"Error ({duration:.2f}s): {e}", exc_info=True)
-        await asyncio.to_thread(send_text_message, 
-            f"❌ Error fatal saat full sync ({duration:.1f}s): {str(e)[:150]}. Cek log.", chat_id)
-
-
-# TAMBAHKAN handler ke main() function (sekitar line 497, setelah sync_proxies_handler):
-
-        application.add_handler(CommandHandler("sync_proxies", sync_proxies_handler))
-        if ENABLE_WEBSHARE_IP_SYNC:
-            application.add_handler(CommandHandler("sync_ip", sync_webshare_ip_handler))
-        application.add_handler(CommandHandler("full_sync", full_sync_handler))  # TAMBAH INI
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
 def get_main_keyboard():
     keyboard = [
@@ -583,8 +462,25 @@ async def sync_webshare_ip_handler(update: Update, context: ContextTypes.DEFAULT
     logger.info(f"Manual Webshare IP sync requested by chat_id {chat_id}.")
     context.application.create_task(run_sync_webshare_ip_task(chat_id))
 
+async def run_sync_webshare_ip_task(chat_id: str):
+    start_time = time.time()
+    message_prefix = f"Manual Webshare IP Sync (Chat ID: {chat_id}): "
+    try:
+        logger.info(message_prefix + "Running run_webshare_ip_sync...")
+        success = await asyncio.to_thread(run_webshare_ip_sync)
+        duration = time.time() - start_time
+        if success:
+            logger.info(message_prefix + f"OK ({duration:.2f}s).")
+            await asyncio.to_thread(send_text_message, f"✅ Sync IP Webshare manual OK ({duration:.1f}s)!", chat_id)
+        else:
+            logger.error(message_prefix + f"FAILED ({duration:.2f}s).")
+            await asyncio.to_thread(send_text_message, f"⚠️ Sync IP Webshare manual ada error ({duration:.1f}s). Cek log server.", chat_id)
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(message_prefix + f"Error ({duration:.2f}s): {e}", exc_info=True)
+        await asyncio.to_thread(send_text_message, f"❌ Error sync IP Webshare ({duration:.1f}s): {str(e)[:100]}. Cek log.", chat_id)
+
 async def full_sync_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk command /full_sync - Manual trigger full automation."""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text(
         "⏳ Memulai **FULL AUTO SYNC**...\n\n"
@@ -599,9 +495,7 @@ async def full_sync_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Manual full sync requested by chat_id {chat_id}.")
     context.application.create_task(run_full_sync_task(chat_id))
 
-
 async def run_full_sync_task(chat_id: str):
-    """Task async untuk full sync manual & notifikasi ke user."""
     start_time = time.time()
     message_prefix = f"Manual Full Sync (Chat ID: {chat_id}): "
     try:
@@ -630,12 +524,11 @@ async def run_full_sync_task(chat_id: str):
             
     except Exception as e:
         duration = time.time() - start_time
-        logger.error(message_prefix + f"Error ({duration:.2f}s): {e}", exc_info=True)
+        logger.error(message_prefix + f"Error ({duration:.2f}s): {e)", exc_info=True)
         await asyncio.to_thread(send_text_message, 
             f"❌ Error fatal saat full sync ({duration:.1f}s): {str(e)[:150]}. Cek log.", chat_id)
 
 async def setup_bot_commands(app: Application):
-    """Set bot commands AND start the scheduler with FULL automation."""
     commands = [
         BotCommand("start", "Mulai bot & tampilkan menu"),
         BotCommand("info", "Informasi tentang bot"),
@@ -671,8 +564,8 @@ async def setup_bot_commands(app: Application):
             logger.info("Scheduler already running.")
     except Exception as e:
         logger.error(f"❌ Failed to start scheduler: {e}", exc_info=True)
-        
-        async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
 
 def main():
@@ -682,13 +575,13 @@ def main():
 
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-application.add_handler(CommandHandler("sync_proxies", sync_proxies_handler))
+        application.add_handler(CommandHandler("start", start_handler))
+        application.add_handler(CommandHandler("info", info_handler))
+        application.add_handler(CommandHandler("stats", stats_handler))
+        application.add_handler(CommandHandler("sync_proxies", sync_proxies_handler))
         if ENABLE_WEBSHARE_IP_SYNC:
             application.add_handler(CommandHandler("sync_ip", sync_webshare_ip_handler))
-        application.add_handler(CommandHandler("full_sync", full_sync_handler))  # ← TAMBAH INI
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-        if ENABLE_WEBSHARE_IP_SYNC:
-            application.add_handler(CommandHandler("sync_ip", sync_webshare_ip_handler))
+        application.add_handler(CommandHandler("full_sync", full_sync_handler))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         application.add_handler(CallbackQueryHandler(handle_dottrick_backtolist, pattern="^dottrick_backtolist$"))
         application.add_handler(CallbackQueryHandler(callback_handler))
