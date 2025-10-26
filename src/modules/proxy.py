@@ -414,4 +414,95 @@ def check_proxy_final(proxy):
             is_json_ip = False
             try: j = r.json(); is_json_ip = isinstance(j, dict) and ('ip' in j or 'origin' in j)
             except json.JSONDecodeError: pass
-            if is_json_ip or re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1_MESSAGE_TRUNCATED
+            
+            # --- FIX 3 (Area ~Baris 417) ---
+            # Menutup string literal r'...' dengan benar
+            if is_json_ip or re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', content): 
+                return proxy, True, f"OK via {url}"
+            # --- AKHIR FIX 3 ---
+            
+            else: logger.debug(f"Proxy {proxy.split('@')[-1]} unexpected content {url}: {content[:60]}...")
+        except requests.exceptions.HTTPError as e:
+             if e.response.status_code == 407: return proxy, False, "Auth Required (407)"
+             else: logger.debug(f"HTTP Error {proxy.split('@')[-1]} {url}: {e.response.status_code}")
+        except requests.exceptions.Timeout: logger.debug(f"Timeout {proxy.split('@')[-1]} {url}")
+        except requests.exceptions.ProxyError as e: r = str(e).split(':')[-1].strip(); logger.debug(f"Proxy Error {proxy.split('@')[-1]} {url}: {r[:40]}"); return proxy, False, f"Proxy Error ({r[:30]})"
+        except requests.exceptions.RequestException as e: logger.debug(f"Connection Error {proxy.split('@')[-1]} {url}: {e.__class__.__name__}")
+    logger.debug(f"Proxy {proxy.split('@')[-1]} failed checks.")
+    return proxy, False, "Connection Failed / Bad Response"
+
+
+def run_proxy_test(proxies_to_test):
+    """Tes proxy secara concurrent."""
+    if not proxies_to_test: logger.info("No proxies to test."); return []
+    total = len(proxies_to_test)
+    logger.info(f"Testing {total} proxies (Workers: {MAX_WORKERS}, Timeout: {PROXY_TIMEOUT}s)...")
+    good, failed = [], []; count = 0
+    executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    try:
+        future_map = {executor.submit(check_proxy_final, p): p for p in proxies_to_test}
+        log_interval = max(1, total // 20) if total > 0 else 1
+        for future in as_completed(future_map):
+            try:
+                p, ok, msg = future.result(); count += 1
+                if ok: good.append(p)
+                else: failed.append((p, msg))
+                if count % log_interval == 0 or count == total: logger.info(f"Test Progress: {count}/{total} ({(count/total)*100:.1f}%) - Good: {len(good)}")
+            except Exception as exc: pk = future_map[future]; logger.error(f"Error testing {pk.split('@')[-1]}: {exc}"); failed.append((pk, f"Task Error: {exc}")); count += 1
+    finally: executor.shutdown(wait=True)
+    if failed:
+        try:
+            os.makedirs(os.path.dirname(FAIL_PROXY_FILE), exist_ok=True)
+            with open(FAIL_PROXY_FILE, "w", encoding='utf-8') as f: f.write('\n'.join(f"{p} # {r}" for p, r in failed) + '\n')
+            logger.info(f"Saved {len(failed)} failed to '{os.path.basename(FAIL_PROXY_FILE)}'.")
+        except IOError as e: logger.error(f"Failed save failed proxies: {e}")
+    logger.info(f"Test complete. Good: {len(good)}/{total}.")
+    return good
+
+def sync_proxies() -> bool:
+    """Fungsi utama: Sync IP -> Download -> Convert -> Backup -> Test -> Update."""
+    start = time.time(); logger.info("===== Starting Proxy Sync Process ====="); status = True
+
+    if ENABLE_WEBSHARE_IP_SYNC:
+        logger.info("--- Step 0: Webshare IP Sync ---")
+        if not run_webshare_ip_sync(): logger.warning("Webshare IP Sync errors. Continuing...")
+    else: logger.info("--- Step 0: Webshare IP Sync (Skipped) ---")
+
+    logger.info("--- Step 1: Downloading ---"); downloaded = download_proxies_from_apis()
+    if downloaded:
+        logger.info("--- Step 2: Converting ---")
+        if not convert_proxylist_to_http(PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE): logger.error("Conversion failed. Aborting."); return False
+    else: logger.warning("No proxies downloaded. Using existing 'proxy.txt'.")
+
+    logger.info("--- Step 3: Backup ---")
+    try:
+        if os.path.exists(PROXY_SOURCE_FILE): os.makedirs(os.path.dirname(PROXY_BACKUP_FILE), exist_ok=True); shutil.copy(PROXY_SOURCE_FILE, PROXY_BACKUP_FILE); logger.info(f"Backup: '{os.path.basename(PROXY_BACKUP_FILE)}'")
+        else: logger.info("No 'proxy.txt' to back up.")
+    except Exception as e: logger.warning(f"Backup failed: {e}")
+
+    logger.info("--- Step 4: Load & Dedupe ---"); to_test = load_and_deduplicate_proxies(PROXY_SOURCE_FILE)
+    if not to_test: logger.error("No unique proxies to test. Aborting."); return False
+
+    logger.info("--- Step 5: Testing ---"); good = run_proxy_test(to_test)
+
+    logger.info("--- Step 6: Updating List ---")
+    if not good: logger.error("No working proxies. 'proxy.txt' NOT updated."); status = False
+    else:
+        try:
+            random.shuffle(good)
+            with open(PROXY_SOURCE_FILE, "w", encoding='utf-8') as f: f.write('\n'.join(good) + '\n')
+            logger.info(f"Updated '{os.path.basename(PROXY_SOURCE_FILE)}' with {len(good)} working proxies.")
+        except IOError as e: logger.error(f"Failed update '{os.path.basename(PROXY_SOURCE_FILE)}': {e}"); status = False
+
+    duration = time.time() - start; logger.info(f"===== Proxy Sync Finished in {duration:.2f}s (Success: {status}) =====")
+    return status
+
+# Testing entry point
+if __name__ == "__main__":
+    print("Running proxy module directly for testing...")
+    if not logging.getLogger().hasHandlers(): logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
+    if not os.path.exists(APILIST_SOURCE_FILE): os.makedirs(os.path.dirname(APILIST_SOURCE_FILE), exist_ok=True); open(APILIST_SOURCE_FILE, 'a').close(); print(f"Created dummy {os.path.basename(APILIST_SOURCE_FILE)}")
+    if not os.path.exists(WEBSHARE_APIKEYS_FILE): os.makedirs(os.path.dirname(WEBSHARE_APIKEYS_FILE), exist_ok=True); open(WEBSHARE_APIKEYS_FILE, 'a').close(); print(f"Created dummy {os.path.basename(WEBSHARE_APIKEYS_FILE)}")
+    os.environ['ENABLE_WEBSHARE_IP_SYNC'] = 'true'
+    from ..config import ENABLE_WEBSHARE_IP_SYNC; print(f"Webshare IP Sync Enabled: {ENABLE_WEBSHARE_IP_SYNC}")
+    success = sync_proxies(); print(f"\nSync process completed. Success: {success}")
