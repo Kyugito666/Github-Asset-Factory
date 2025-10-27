@@ -1,11 +1,9 @@
 """
 Telegram Bot Command & Message Handlers
 
-Menangani:
-- Command handlers (/start, /info, /stats, /sync_proxies, /sync_ip, /full_sync)
-- Text message handlers (button presses)
-- Proxy menu operations
-- Background task triggers
+FIXED: 
+- run_full_auto_sync_task → run_full_sync_task (line 302)
+- Import full_webshare_auto_sync dari scheduler
 """
 
 import logging
@@ -31,7 +29,6 @@ from .scheduler import full_webshare_auto_sync
 
 logger = logging.getLogger(__name__)
 
-# List semua tipe persona
 ALL_PERSONAS = [
     "explorer", "project_starter", "professional", "fullstack_dev", "polymath_dev", "student_learner",
     "forker", "socialite", "open_source_advocate", "issue_reporter", "community_helper",
@@ -49,9 +46,8 @@ ALL_PERSONAS = [
 # COMMAND HANDLERS
 # ============================================================
 from ..services.llm.caller import _provider_cooldown, _model_cooldown, COOLDOWN_DURATION
-import time
+
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk /start command."""
     user = update.effective_user
     user_name = user.first_name if user else "Engineer"
     message = (f"👋 Halo, **{user_name}**!\n\n"
@@ -64,7 +60,6 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk /info command."""
     message = (f"ℹ️ **{APP_NAME}** ({APP_VERSION})\n\n"
                "Bot ini menghasilkan:\n"
                "• Persona developer (profil realistis)\n"
@@ -80,37 +75,25 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk /stats command."""
     message = "📊 **Bot Statistics**\n\n"
     
-    # AI Stats
     num_options = len(llm_call_options)
     if num_options > 0:
         message += f"**AI Fallback System:**\n• Total Model Options: `{num_options}`\n\n"
     else:
         message += "**AI Fallback System:**\n• `Error: No models loaded!`\n\n"
 
-    # Cooldown Stats (NEW)
     current_time = time.time()
-    active_provider_cooldowns = 0
-    active_model_cooldowns = 0
-    
-    for provider, timestamp in _provider_cooldown.items():
-        remaining = COOLDOWN_DURATION - (current_time - timestamp)
-        if remaining > 0:
-            active_provider_cooldowns += 1
-    
-    for model_key, timestamp in _model_cooldown.items():
-        remaining = COOLDOWN_DURATION - (current_time - timestamp)
-        if remaining > 0:
-            active_model_cooldowns += 1
+    active_provider_cooldowns = sum(1 for timestamp in _provider_cooldown.values() 
+                                     if COOLDOWN_DURATION - (current_time - timestamp) > 0)
+    active_model_cooldowns = sum(1 for timestamp in _model_cooldown.values() 
+                                  if COOLDOWN_DURATION - (current_time - timestamp) > 0)
     
     if active_provider_cooldowns > 0 or active_model_cooldowns > 0:
         message += (f"**AI Cooldowns (1h):**\n"
                     f"• Provider Cooldowns: `{active_provider_cooldowns}`\n"
                     f"• Model Cooldowns: `{active_model_cooldowns}`\n\n")
 
-    # Proxy Stats
     if PROXY_POOL and PROXY_POOL.proxies:
         active_proxies = len(PROXY_POOL.proxies)
         failed_now = len(PROXY_POOL.failed_proxies)
@@ -120,26 +103,6 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         message += "**Proxy Pool:** `Inactive (No proxies loaded)`\n\n"
 
-    # Gmail Stats
-    stats_gmail = get_stats()
-    message += (f"**Gmail Dot Trick:**\n"
-                f"• Emails in `data/gmail.txt`: `{stats_gmail['total_emails_in_file']}`\n"
-                f"• Emails in History: `{stats_gmail['emails_with_variations']}`\n"
-                f"• Total Variations Generated: `{stats_gmail['total_variations_generated']}`")
-
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
-
-    # Proxy Stats
-    if PROXY_POOL and PROXY_POOL.proxies:
-        active_proxies = len(PROXY_POOL.proxies)
-        failed_now = len(PROXY_POOL.failed_proxies)
-        message += (f"**Proxy Pool:**\n"
-                    f"• Total Loaded: `{active_proxies}`\n"
-                    f"• Currently Cooldown: `{failed_now}`\n\n")
-    else:
-        message += "**Proxy Pool:** `Inactive (No proxies loaded)`\n\n"
-
-    # Gmail Stats
     stats_gmail = get_stats()
     message += (f"**Gmail Dot Trick:**\n"
                 f"• Emails in `data/gmail.txt`: `{stats_gmail['total_emails_in_file']}`\n"
@@ -150,7 +113,6 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def sync_proxies_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk /sync_proxies command - manual proxy sync."""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text("⏳ Memulai sinkronisasi proxy manual (Download, Test, Update)...", 
                                     parse_mode=ParseMode.MARKDOWN)
@@ -159,7 +121,6 @@ async def sync_proxies_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def sync_webshare_ip_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk /sync_ip command - manual Webshare IP sync."""
     chat_id = str(update.message.chat_id)
     if not ENABLE_WEBSHARE_IP_SYNC:
          await update.message.reply_text("⛔ Fitur Webshare IP Sync tidak diaktifkan di konfigurasi (.env).")
@@ -170,7 +131,6 @@ async def sync_webshare_ip_handler(update: Update, context: ContextTypes.DEFAULT
 
 
 async def full_sync_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk /full_sync command - full automation."""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text(
         "⏳ Memulai **FULL AUTO SYNC**...\n\n"
@@ -187,17 +147,15 @@ async def full_sync_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# TEXT MESSAGE HANDLER (Button Presses)
+# TEXT MESSAGE HANDLER
 # ============================================================
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk text messages (keyboard button presses)."""
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
 
-    # Import dot_trick_handler dari callbacks (avoid circular import)
     from .callbacks import dot_trick_handler
 
     if text == "🎲 Random":
@@ -240,7 +198,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ============================================================
 
 async def show_proxy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tampilkan proxy management menu."""
     message = (
         "🔧 **Proxy Management Menu**\n\n"
         "Pilih operasi yang ingin dijalankan:\n\n"
@@ -255,7 +212,6 @@ async def show_proxy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def trigger_ip_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger IP authorization sync."""
     chat_id = str(update.message.chat_id)
     if not ENABLE_WEBSHARE_IP_SYNC:
         await update.message.reply_text("⛔ Fitur IP Auth tidak aktif di konfigurasi.")
@@ -265,28 +221,25 @@ async def trigger_ip_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def trigger_download_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger proxy download."""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text("⬇️ **Memulai Download Proxy...**", parse_mode=ParseMode.MARKDOWN)
     context.application.create_task(run_download_proxy_task(chat_id))
 
 
 async def trigger_convert_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger proxy format conversion."""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text("🔄 **Memulai Convert Format...**", parse_mode=ParseMode.MARKDOWN)
     context.application.create_task(run_convert_proxy_task(chat_id))
 
 
 async def trigger_test_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger proxy testing."""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text("✅ **Memulai Test Proxy...**", parse_mode=ParseMode.MARKDOWN)
     context.application.create_task(run_test_proxy_task(chat_id))
 
 
 async def trigger_full_auto_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger full auto sync dari button."""
+    """FIXED: Gunakan run_full_sync_task (bukan run_full_auto_sync_task)"""
     chat_id = str(update.message.chat_id)
     await update.message.reply_text(
         "🚀 **Memulai Full Auto Sync...**\n\n"
@@ -299,7 +252,7 @@ async def trigger_full_auto_sync(update: Update, context: ContextTypes.DEFAULT_T
         "_Harap tunggu 1-3 menit..._",
         parse_mode=ParseMode.MARKDOWN
     )
-    context.application.create_task(run_full_auto_sync_task(chat_id))
+    context.application.create_task(run_full_sync_task(chat_id))
 
 
 # ============================================================
@@ -307,7 +260,6 @@ async def trigger_full_auto_sync(update: Update, context: ContextTypes.DEFAULT_T
 # ============================================================
 
 async def trigger_generation(query_or_message, persona_type: str, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger persona generation (callback dari button atau command)."""
     target_chat_id = None
     
     if isinstance(query_or_message, Update):
@@ -345,7 +297,6 @@ async def trigger_generation(query_or_message, persona_type: str, context: Conte
 # ============================================================
 
 async def run_generation_task(chat_id: int, persona_type: str):
-    """Background task untuk generate persona."""
     logger.info(f"Starting persona generation task for '{persona_type}' (Chat ID: {chat_id})...")
     start_time = time.time()
     try:
@@ -370,7 +321,6 @@ async def run_generation_task(chat_id: int, persona_type: str):
 
 
 async def run_sync_proxies_task(chat_id: str):
-    """Background task untuk manual proxy sync."""
     start_time = time.time()
     message_prefix = f"Manual Proxy Sync (Chat ID: {chat_id}): "
     try:
@@ -395,7 +345,6 @@ async def run_sync_proxies_task(chat_id: str):
 
 
 async def run_sync_webshare_ip_task(chat_id: str):
-    """Background task untuk manual Webshare IP sync."""
     start_time = time.time()
     message_prefix = f"Manual Webshare IP Sync (Chat ID: {chat_id}): "
     try:
@@ -418,7 +367,7 @@ async def run_sync_webshare_ip_task(chat_id: str):
 
 
 async def run_full_sync_task(chat_id: str):
-    """Background task untuk full auto sync."""
+    """FIXED: Nama fungsi sesuai dengan yang dipanggil"""
     start_time = time.time()
     message_prefix = f"Manual Full Sync (Chat ID: {chat_id}): "
     try:
@@ -452,7 +401,6 @@ async def run_full_sync_task(chat_id: str):
 
 
 async def run_ip_auth_task(chat_id: str):
-    """Background task untuk IP authorization."""
     start_time = time.time()
     try:
         success = await asyncio.to_thread(run_webshare_ip_sync)
@@ -469,7 +417,6 @@ async def run_ip_auth_task(chat_id: str):
 
 
 async def run_download_proxy_task(chat_id: str):
-    """Background task untuk download proxy."""
     start_time = time.time()
     try:
         from ..modules.proxy import download_proxies_from_apis
@@ -488,7 +435,6 @@ async def run_download_proxy_task(chat_id: str):
 
 
 async def run_convert_proxy_task(chat_id: str):
-    """Background task untuk convert proxy format."""
     start_time = time.time()
     try:
         from ..modules.proxy import convert_proxylist_to_http, PROXYLIST_SOURCE_FILE, PROXY_SOURCE_FILE
@@ -509,7 +455,6 @@ async def run_convert_proxy_task(chat_id: str):
 
 
 async def run_test_proxy_task(chat_id: str):
-    """Background task untuk test proxy."""
     start_time = time.time()
     try:
         from ..modules.proxy import run_proxy_test, load_and_deduplicate_proxies, PROXY_SOURCE_FILE
